@@ -28,14 +28,44 @@ public class TracearrClient
 
     public async Task<IReadOnlyList<TracearrServer>> GetJellyfinServersAsync(string url, string apiKey, CancellationToken cancellationToken)
     {
-        var response = await GetAsync<ServersResponse>(url, apiKey, "/servers", cancellationToken).ConfigureAwait(false);
-        return (response.Data ?? [])
+        var response = await GetAsync<ServersResponse>(url, apiKey, "/servers", false, cancellationToken).ConfigureAwait(false);
+        return (response!.Data ?? [])
             .Where(server => server.ServerType == "jellyfin")
             .Select(server => new TracearrServer(server.ServerId, server.ServerName))
             .ToList();
     }
 
-    private async Task<T> GetAsync<T>(string url, string apiKey, string path, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TracearrCopy>?> GetCopiesAsync(string url, string apiKey, string reference, CancellationToken cancellationToken)
+    {
+        var media = await GetAsync<MediaDto>(url, apiKey, "/media/" + Uri.EscapeDataString(reference), true, cancellationToken).ConfigureAwait(false);
+        if (media is null)
+        {
+            return null;
+        }
+
+        var copies = new List<TracearrCopy>();
+        foreach (var availability in media.Availability ?? [])
+        {
+            copies.Add(new TracearrCopy(availability.ServerId, availability.RatingKey, availability.AddedAt, availability.RemovedAt));
+            if (availability.Replaces is { } replaced)
+            {
+                copies.Add(new TracearrCopy(availability.ServerId, null, replaced.AddedAt, replaced.RemovedAt));
+            }
+        }
+
+        return copies;
+    }
+
+    public async Task<IReadOnlyList<TracearrChild>> GetChildrenAsync(string url, string apiKey, string reference, CancellationToken cancellationToken)
+    {
+        var response = await GetAsync<ChildrenResponse>(url, apiKey, "/media/" + Uri.EscapeDataString(reference) + "/children", true, cancellationToken).ConfigureAwait(false);
+        return (response?.Data ?? [])
+            .Select(child => new TracearrChild(child.Id, child.SeasonNumber, child.EpisodeNumber))
+            .ToList();
+    }
+
+    private async Task<T?> GetAsync<T>(string url, string apiKey, string path, bool notFoundAsNull, CancellationToken cancellationToken)
+        where T : class
     {
         if (!Uri.TryCreate(url.TrimEnd('/') + "/api/v2/public" + path, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -53,6 +83,11 @@ public class TracearrClient
             using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
                 .SendAsync(request, timeout.Token)
                 .ConfigureAwait(false);
+            if (notFoundAsNull && response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 throw new TracearrException(response.StatusCode switch
@@ -83,4 +118,14 @@ public class TracearrClient
     private sealed record ServersResponse(IReadOnlyList<ServerDto>? Data);
 
     private sealed record ServerDto(string ServerId, string ServerName, string ServerType);
+
+    private sealed record MediaDto(IReadOnlyList<AvailabilityDto>? Availability);
+
+    private sealed record AvailabilityDto(string ServerId, string? RatingKey, DateTime AddedAt, DateTime? RemovedAt, ReplacedDto? Replaces);
+
+    private sealed record ReplacedDto(DateTime AddedAt, DateTime RemovedAt);
+
+    private sealed record ChildrenResponse(IReadOnlyList<ChildDto>? Data);
+
+    private sealed record ChildDto(string Id, int? SeasonNumber, int? EpisodeNumber);
 }

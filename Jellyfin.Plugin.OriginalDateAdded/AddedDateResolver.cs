@@ -26,9 +26,11 @@ public class AddedDateResolver
     public async Task<IReadOnlyDictionary<Guid, AddedDateDecision>> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
         var window = TimeSpan.FromDays(Plugin.Instance!.Configuration.ReplacementWindowDays);
-        var originals = items
+        var sourceItems = items
             .DistinctBy(item => item.Id)
-            .ToDictionary(item => item.Id, item => _store.GetItem(item.Id)?.Original ?? item.DateCreated);
+            .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.Original ?? item.DateCreated))
+            .ToList();
+        var originals = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.Original);
         var best = new Dictionary<Guid, AddedDateDecision>();
 
         foreach (var source in _sources)
@@ -36,7 +38,7 @@ public class AddedDateResolver
             IReadOnlyDictionary<Guid, AddedDateCandidate> candidates;
             try
             {
-                candidates = await source.GetCandidatesAsync(items, cancellationToken).ConfigureAwait(false);
+                candidates = await source.GetCandidatesAsync(sourceItems, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
