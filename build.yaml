@@ -1,0 +1,16 @@
+name: "Original Date Added"
+guid: "8b0cb393-ba1e-4589-9b1d-1044945e96c4"
+version: "0.0.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
+overview: "Keeps an item's original date added when its file is replaced"
+description: >
+  When Radarr or Sonarr upgrade or rename a file, Jellyfin treats the result
+  as a new item with a new date added, so it shows up in Recently Added again.
+  This plugin restores the date the content was first added.
+category: "Metadata"
+owner: "pelluch"
+artifacts:
+- "Jellyfin.Plugin.OriginalDateAdded.dll"
+changelog: >
+  changelog
