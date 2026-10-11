@@ -10,7 +10,5 @@ public interface IAddedDateSource
 {
     string Name { get; }
 
-    bool UseDuringRefresh { get; }
-
     Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken);
 }

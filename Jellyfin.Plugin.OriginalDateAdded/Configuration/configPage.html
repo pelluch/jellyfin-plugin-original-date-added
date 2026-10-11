@@ -9,6 +9,11 @@
         <div data-role="content">
             <div class="content-primary">
                 <form id="OriginalDateAddedConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ReplacementWindowDays">Replacement window (days)</label>
+                        <input id="ReplacementWindowDays" name="ReplacementWindowDays" type="number" is="emby-input" min="0" required />
+                        <div class="fieldDescription">Maximum number of days that can pass between an item being removed and its replacement being scanned in before it is no longer eligible for an added date update. Beyond this, the item's replacement will get added to "Recently Added" as per the logic without this plugin.</div>
+                    </div>
                     <div>
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
@@ -26,6 +31,7 @@
                 .addEventListener('pageshow', function() {
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
+                        document.querySelector('#ReplacementWindowDays').value = config.ReplacementWindowDays;
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -34,6 +40,7 @@
                 .addEventListener('submit', function(e) {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
+                    config.ReplacementWindowDays = parseInt(document.querySelector('#ReplacementWindowDays').value, 10);
                     ApiClient.updatePluginConfiguration(OriginalDateAddedConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
