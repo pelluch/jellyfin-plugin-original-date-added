@@ -1,0 +1,202 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
+using Jellyfin.Data.Enums;
+using MediaBrowser.Common.Configuration;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.OriginalDateAdded.Store;
+
+public sealed class AddedDateStore : IDisposable
+{
+    private static readonly TimeSpan _writeDelay = TimeSpan.FromSeconds(5);
+
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() },
+        WriteIndented = true,
+    };
+
+    private readonly ILogger<AddedDateStore> _logger;
+    private readonly string _path;
+    private readonly Lock _dataLock = new();
+    private readonly Lock _writeLock = new();
+    private readonly Timer _writeTimer;
+    private readonly StoreData _data;
+    private bool _writePending;
+
+    public AddedDateStore(IApplicationPaths applicationPaths, ILogger<AddedDateStore> logger)
+    {
+        _logger = logger;
+        var directory = Path.Combine(applicationPaths.DataPath, "original-date-added");
+        Directory.CreateDirectory(directory);
+        _path = Path.Combine(directory, "dates.json");
+        _data = Load();
+        _writeTimer = new Timer(_ => Write(), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+    }
+
+    public ItemEntry? GetItem(Guid itemId)
+    {
+        lock (_dataLock)
+        {
+            return _data.Items.GetValueOrDefault(itemId);
+        }
+    }
+
+    public void SetItem(Guid itemId, ItemEntry entry)
+    {
+        entry = entry with { Date = AsUtc(entry.Date), Original = AsUtc(entry.Original) };
+        lock (_dataLock)
+        {
+            if (_data.Items.GetValueOrDefault(itemId) == entry)
+            {
+                return;
+            }
+
+            _data.Items[itemId] = entry;
+            ScheduleWrite();
+        }
+    }
+
+    public void RemoveItem(Guid itemId)
+    {
+        lock (_dataLock)
+        {
+            if (_data.Items.Remove(itemId))
+            {
+                ScheduleWrite();
+            }
+        }
+    }
+
+    public void AddRemoved(IEnumerable<string> keys, RemovedEntry entry)
+    {
+        entry = entry with { Date = AsUtc(entry.Date), RemovedAt = AsUtc(entry.RemovedAt) };
+        lock (_dataLock)
+        {
+            foreach (var key in keys)
+            {
+                if (_data.Removed.TryGetValue(key, out var existing) && existing.ItemType == entry.ItemType)
+                {
+                    _data.Removed[key] = entry with
+                    {
+                        Date = existing.Date < entry.Date ? existing.Date : entry.Date,
+                        RemovedAt = existing.RemovedAt > entry.RemovedAt ? existing.RemovedAt : entry.RemovedAt,
+                    };
+                }
+                else
+                {
+                    _data.Removed[key] = entry;
+                }
+
+                ScheduleWrite();
+            }
+        }
+    }
+
+    public RemovedEntry? FindRemoved(IEnumerable<string> keys, BaseItemKind itemType)
+    {
+        lock (_dataLock)
+        {
+            return keys
+                .Select(key => _data.Removed.GetValueOrDefault(key))
+                .Where(entry => entry is not null && entry.ItemType == itemType)
+                .MinBy(entry => entry!.Date);
+        }
+    }
+
+    public void PruneRemoved(DateTime removedBefore)
+    {
+        removedBefore = AsUtc(removedBefore);
+        lock (_dataLock)
+        {
+            var expired = _data.Removed.Where(pair => pair.Value.RemovedAt < removedBefore).Select(pair => pair.Key).ToList();
+            foreach (var key in expired)
+            {
+                _data.Removed.Remove(key);
+            }
+
+            if (expired.Count > 0)
+            {
+                ScheduleWrite();
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _writeTimer.Dispose();
+        Write();
+    }
+
+    private static DateTime AsUtc(DateTime date)
+        => date.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(date, DateTimeKind.Utc) : date.ToUniversalTime();
+
+    private StoreData Load()
+    {
+        if (!File.Exists(_path))
+        {
+            return new StoreData();
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(_path);
+            return JsonSerializer.Deserialize<StoreData>(stream, _jsonOptions) ?? new StoreData();
+        }
+        catch (JsonException ex)
+        {
+            var corruptPath = $"{_path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            File.Move(_path, corruptPath);
+            _logger.LogError(ex, "Could not read {Path}, moved it to {CorruptPath} and starting with an empty store", _path, corruptPath);
+            return new StoreData();
+        }
+    }
+
+    private void ScheduleWrite()
+    {
+        if (!_writePending)
+        {
+            _writePending = true;
+            _writeTimer.Change(_writeDelay, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private void Write()
+    {
+        lock (_writeLock)
+        {
+            string json;
+            lock (_dataLock)
+            {
+                if (!_writePending)
+                {
+                    return;
+                }
+
+                _writePending = false;
+                json = JsonSerializer.Serialize(_data, _jsonOptions);
+            }
+
+            var tempPath = _path + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, json);
+                File.Move(tempPath, _path, overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogError(ex, "Could not write {Path}", _path);
+                lock (_dataLock)
+                {
+                    ScheduleWrite();
+                }
+            }
+        }
+    }
+}
