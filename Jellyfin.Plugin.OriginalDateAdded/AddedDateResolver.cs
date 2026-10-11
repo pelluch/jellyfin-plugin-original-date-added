@@ -12,6 +12,8 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 
 public class AddedDateResolver
 {
+    public static readonly TimeSpan MinimumDifference = TimeSpan.FromMinutes(1); // absorbs rounding between sources, e.g. Tracearr's milliseconds
+
     private readonly IEnumerable<IAddedDateSource> _sources;
     private readonly AddedDateStore _store;
     private readonly ILogger<AddedDateResolver> _logger;
@@ -53,11 +55,11 @@ public class AddedDateResolver
                     continue;
                 }
 
-                if (candidate.AddedAt >= original)
+                if (candidate.AddedAt > original - MinimumDifference)
                 {
                     _logger.Log(
                         PluginSettings.DetailLevel,
-                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), not earlier than {Original}",
+                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), not at least a minute earlier than {Original}",
                         itemId,
                         candidate.AddedAt,
                         source.Name,

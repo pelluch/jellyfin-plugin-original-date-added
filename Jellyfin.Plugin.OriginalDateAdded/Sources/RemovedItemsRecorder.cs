@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -20,13 +21,20 @@ public sealed class RemovedItemsRecorder : IHostedService
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateStore _store;
     private readonly AddedDateResolver _resolver;
+    private readonly AddedDateApplier _applier;
     private readonly ILogger<RemovedItemsRecorder> _logger;
 
-    public RemovedItemsRecorder(ILibraryManager libraryManager, AddedDateStore store, AddedDateResolver resolver, ILogger<RemovedItemsRecorder> logger)
+    public RemovedItemsRecorder(
+        ILibraryManager libraryManager,
+        AddedDateStore store,
+        AddedDateResolver resolver,
+        AddedDateApplier applier,
+        ILogger<RemovedItemsRecorder> logger)
     {
         _libraryManager = libraryManager;
         _store = store;
         _resolver = resolver;
+        _applier = applier;
         _logger = logger;
     }
 
@@ -109,42 +117,13 @@ public sealed class RemovedItemsRecorder : IHostedService
             }
 
             var decisions = await _resolver.ResolveAsync(successors, CancellationToken.None).ConfigureAwait(false);
+            var reason = string.Create(CultureInfo.InvariantCulture, $"after {removed.Name} ({removed.Id}) was removed");
             foreach (var successor in successors)
             {
-                if (!decisions.TryGetValue(successor.Id, out var decision)
-                    || (_store.GetItem(successor.Id) is { } stored && stored.Date <= decision.Entry.Date))
+                if (decisions.TryGetValue(successor.Id, out var decision))
                 {
-                    continue;
+                    await _applier.ApplyAsync(successor, decision, reason, CancellationToken.None).ConfigureAwait(false);
                 }
-
-                if (PluginSettings.DryRun)
-                {
-                    _logger.LogInformation(
-                        "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}, after {RemovedName} ({RemovedId}) was removed",
-                        successor.Name,
-                        successor.Id,
-                        decision.Entry.Date,
-                        decision.Entry.Source,
-                        decision.Detail,
-                        decision.Entry.Original,
-                        removed.Name,
-                        removed.Id);
-                    continue;
-                }
-
-                _store.SetItem(successor.Id, decision.Entry);
-                _logger.LogInformation(
-                    "Date added of {Name} ({ItemId}) is {Date} from {Source} ({Detail}), scanned as {Original}, applied after {RemovedName} ({RemovedId}) was removed",
-                    successor.Name,
-                    successor.Id,
-                    decision.Entry.Date,
-                    decision.Entry.Source,
-                    decision.Detail,
-                    decision.Entry.Original,
-                    removed.Name,
-                    removed.Id);
-                successor.DateCreated = decision.Entry.Date;
-                await successor.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
             }
         }
         catch (Exception ex)

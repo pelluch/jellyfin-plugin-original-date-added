@@ -10,20 +10,27 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using MediaBrowser.Common.Net;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Tracearr;
 
 public class TracearrClient
 {
+    private const int MaxRateLimitRetries = 5;
+
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _defaultRetryDelay = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan _maxRetryDelay = TimeSpan.FromSeconds(60);
 
     private static readonly JsonSerializerOptions _jsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower };
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<TracearrClient> _logger;
 
-    public TracearrClient(IHttpClientFactory httpClientFactory)
+    public TracearrClient(IHttpClientFactory httpClientFactory, ILogger<TracearrClient> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<TracearrServer>> GetJellyfinServersAsync(string url, string apiKey, CancellationToken cancellationToken)
@@ -64,6 +71,14 @@ public class TracearrClient
             .ToList();
     }
 
+    private static TimeSpan RetryDelay(HttpResponseMessage response)
+    {
+        var retryAfter = response.Headers.RetryAfter;
+        var delay = retryAfter?.Delta
+            ?? (retryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : _defaultRetryDelay);
+        return delay < TimeSpan.Zero ? TimeSpan.Zero : delay > _maxRetryDelay ? _maxRetryDelay : delay;
+    }
+
     private async Task<T?> GetAsync<T>(string url, string apiKey, string path, bool notFoundAsNull, CancellationToken cancellationToken)
         where T : class
     {
@@ -73,45 +88,57 @@ public class TracearrClient
             throw new TracearrException("The Tracearr URL is not a valid http(s) URL");
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(_timeout);
-        using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
-                .SendAsync(request, timeout.Token)
-                .ConfigureAwait(false);
-            if (notFoundAsNull && response.StatusCode == HttpStatusCode.NotFound)
-            {
-                return null;
-            }
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_timeout);
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
 
-            if (!response.IsSuccessStatusCode)
+            try
             {
-                throw new TracearrException(response.StatusCode switch
+                using var response = await _httpClientFactory.CreateClient(NamedClient.Default)
+                    .SendAsync(request, timeout.Token)
+                    .ConfigureAwait(false);
+                if (response.StatusCode == HttpStatusCode.TooManyRequests && attempt < MaxRateLimitRetries)
                 {
-                    HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Tracearr rejected the API key",
-                    HttpStatusCode.NotFound => "Tracearr's public API was not found at this URL",
-                    _ => string.Create(CultureInfo.InvariantCulture, $"Tracearr returned HTTP {(int)response.StatusCode}"),
-                });
-            }
+                    var delay = RetryDelay(response);
+                    _logger.LogInformation("Tracearr rate limit reached, retrying in {Seconds:F0} seconds", delay.TotalSeconds);
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
 
-            return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, timeout.Token).ConfigureAwait(false)
-                ?? throw new TracearrException("Tracearr returned an empty response");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TracearrException(string.Create(CultureInfo.InvariantCulture, $"Tracearr did not respond within {_timeout.TotalSeconds} seconds"));
-        }
-        catch (HttpRequestException ex)
-        {
-            throw new TracearrException("Could not reach Tracearr: " + ex.Message, ex);
-        }
-        catch (JsonException ex)
-        {
-            throw new TracearrException("Tracearr returned an unexpected response", ex);
+                if (notFoundAsNull && response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    return null;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new TracearrException(response.StatusCode switch
+                    {
+                        HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Tracearr rejected the API key",
+                        HttpStatusCode.NotFound => "Tracearr's public API was not found at this URL",
+                        HttpStatusCode.TooManyRequests => "Tracearr's rate limit was still exceeded after retrying",
+                        _ => string.Create(CultureInfo.InvariantCulture, $"Tracearr returned HTTP {(int)response.StatusCode}"),
+                    });
+                }
+
+                return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, timeout.Token).ConfigureAwait(false)
+                    ?? throw new TracearrException("Tracearr returned an empty response");
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new TracearrException(string.Create(CultureInfo.InvariantCulture, $"Tracearr did not respond within {_timeout.TotalSeconds} seconds"));
+            }
+            catch (HttpRequestException ex)
+            {
+                throw new TracearrException("Could not reach Tracearr: " + ex.Message, ex);
+            }
+            catch (JsonException ex)
+            {
+                throw new TracearrException("Tracearr returned an unexpected response", ex);
+            }
         }
     }
 

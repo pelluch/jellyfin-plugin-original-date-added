@@ -91,7 +91,7 @@ public class TracearrSource : IAddedDateSource
         var links = 0;
         var appearedAt = original;
         while (copies
-            .Where(copy => copy.AddedAt < appearedAt && (copy.RemovedAt is not { } removedAt || appearedAt - removedAt <= window))
+            .Where(copy => copy.AddedAt <= appearedAt - AddedDateResolver.MinimumDifference && (copy.RemovedAt is not { } removedAt || appearedAt - removedAt <= window))
             .MinBy(copy => copy.AddedAt) is { } link)
         {
             first ??= link;
