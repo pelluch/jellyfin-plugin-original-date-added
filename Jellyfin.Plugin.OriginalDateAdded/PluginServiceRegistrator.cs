@@ -12,6 +12,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection.AddSingleton<AddedDateStore>();
         serviceCollection.AddSingleton<AddedDateResolver>();
-        serviceCollection.AddSingleton<IAddedDateSource>();
+        serviceCollection.AddSingleton<IAddedDateSource, RemovedItemsSource>();
+        serviceCollection.AddHostedService<RemovedItemsRecorder>();
     }
 }
