@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -13,6 +14,8 @@ namespace Jellyfin.Plugin.OriginalDateAdded.Store;
 
 public sealed class AddedDateStore : IDisposable
 {
+    private const int BackupsToKeep = 5;
+
     private static readonly TimeSpan _writeDelay = TimeSpan.FromSeconds(5);
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -136,10 +139,42 @@ public sealed class AddedDateStore : IDisposable
         }
     }
 
+    public (int Items, int Removed, string BackupPath) ClearWithBackup()
+    {
+        lock (_writeLock)
+        {
+            lock (_dataLock)
+            {
+                var backupPath = string.Create(CultureInfo.InvariantCulture, $"{_path}.cleared-{DateTime.UtcNow:yyyyMMddHHmmss}");
+                WriteAtomically(backupPath, JsonSerializer.Serialize(_data, _jsonOptions));
+                var backups = Directory.GetFiles(Path.GetDirectoryName(_path)!, Path.GetFileName(_path) + ".cleared-*")
+                    .Order(StringComparer.Ordinal)
+                    .SkipLast(BackupsToKeep);
+                foreach (var oldBackup in backups)
+                {
+                    File.Delete(oldBackup);
+                }
+
+                var result = (_data.Items.Count, _data.Removed.Count, backupPath);
+                _data.Items.Clear();
+                _data.Removed.Clear();
+                ScheduleWrite();
+                return result;
+            }
+        }
+    }
+
     public void Dispose()
     {
         _writeTimer.Dispose();
         Write();
+    }
+
+    private static void WriteAtomically(string path, string contents)
+    {
+        var tempPath = path + ".tmp";
+        File.WriteAllText(tempPath, contents);
+        File.Move(tempPath, path, overwrite: true);
     }
 
     private static DateTime AsUtc(DateTime date)
@@ -191,11 +226,9 @@ public sealed class AddedDateStore : IDisposable
                 json = JsonSerializer.Serialize(_data, _jsonOptions);
             }
 
-            var tempPath = _path + ".tmp";
             try
             {
-                File.WriteAllText(tempPath, json);
-                File.Move(tempPath, _path, overwrite: true);
+                WriteAtomically(_path, json);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

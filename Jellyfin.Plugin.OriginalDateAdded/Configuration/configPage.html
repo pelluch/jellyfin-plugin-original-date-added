@@ -69,6 +69,14 @@
                         </button>
                     </div>
                 </form>
+                <div class="verticalSection">
+                    <h2 class="sectionTitle">Data</h2>
+                    <button is="emby-button" type="button" id="ClearData" class="raised emby-button">
+                        <span>Clear data</span>
+                    </button>
+                    <div class="fieldDescription">Forgets every date this plugin set and every removed item it recorded. Dates added in Jellyfin stay as they are, but can no longer be reverted to their scanned dates. A backup is saved next to the data first; the last 5 are kept.</div>
+                    <div id="ClearDataResult" class="fieldDescription"></div>
+                </div>
             </div>
         </div>
         <script type="text/javascript">
@@ -91,6 +99,29 @@
                     select.value = selectedId;
                 }
             }
+
+            document.querySelector('#ClearData')
+                .addEventListener('click', function () {
+                    Dashboard.confirm(
+                        'This forgets every date this plugin set and every removed item it recorded. Dates added stay as they are, but can no longer be reverted to their scanned dates. A backup is saved first.',
+                        'Clear data',
+                        function (confirmed) {
+                            if (!confirmed) {
+                                return;
+                            }
+
+                            var result = document.querySelector('#ClearDataResult');
+                            ApiClient.ajax({
+                                type: 'POST',
+                                url: ApiClient.getUrl('OriginalDateAdded/Data/Clear'),
+                                dataType: 'json'
+                            }).then(function (response) {
+                                result.textContent = 'Cleared ' + response.Items + ' dates and ' + response.Removed + ' removed items. Backup: ' + response.BackupFile;
+                            }, function () {
+                                result.textContent = 'Clearing failed, so nothing was cleared. See the server log.';
+                            });
+                        });
+                });
 
             document.querySelector('#TracearrTest')
                 .addEventListener('click', function () {
