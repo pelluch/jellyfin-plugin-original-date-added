@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
+using Jellyfin.Plugin.OriginalDateAdded.Tracearr;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,5 +15,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<AddedDateResolver>();
         serviceCollection.AddSingleton<IAddedDateSource, RemovedItemsSource>();
         serviceCollection.AddHostedService<RemovedItemsRecorder>();
+        serviceCollection.AddSingleton<TracearrClient>();
     }
 }

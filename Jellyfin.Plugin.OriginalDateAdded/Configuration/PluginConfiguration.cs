@@ -9,4 +9,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool DryRun { get; set; }
 
     public bool VerboseLogging { get; set; }
+
+    public bool TracearrEnabled { get; set; }
+
+    public string TracearrUrl { get; set; } = string.Empty;
+
+    public string TracearrApiKey { get; set; } = string.Empty;
+
+    public string TracearrServerId { get; set; } = string.Empty;
+
+    public string TracearrServerName { get; set; } = string.Empty;
 }

@@ -28,6 +28,36 @@
                         </label>
                         <div class="fieldDescription checkboxFieldDescription">Log debug logs</div>
                     </div>
+                    <div class="verticalSection">
+                        <h2 class="sectionTitle">Tracearr</h2>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="TracearrEnabled" name="TracearrEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Use Tracearr</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled, item added dates will also be looked up from Tracearr's history</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TracearrUrl">URL</label>
+                            <input id="TracearrUrl" name="TracearrUrl" type="url" is="emby-input" placeholder="https://tracearr.example.com" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TracearrApiKey">API key</label>
+                            <input id="TracearrApiKey" name="TracearrApiKey" type="password" is="emby-input" autocomplete="off" />
+                            <div class="fieldDescription">Tracearr public API token (trr_pub_…).</div>
+                        </div>
+                        <div>
+                            <button is="emby-button" type="button" id="TracearrTest" class="raised emby-button">
+                                <span>Test</span>
+                            </button>
+                            <div id="TracearrTestResult" class="fieldDescription"></div>
+                        </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="TracearrServerId">Tracearr server</label>
+                            <select is="emby-select" id="TracearrServerId" name="TracearrServerId" class="emby-select-withcolor emby-select"></select>
+                            <div class="fieldDescription">Which Tracearr Jellyfin backend corresponds to this server.</div>
+                        </div>
+                    </div>
                     <div>
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
@@ -41,6 +71,45 @@
                 pluginUniqueId: '8b0cb393-ba1e-4589-9b1d-1044945e96c4'
             };
 
+            function setTracearrServers(servers, selectedId) {
+                var select = document.querySelector('#TracearrServerId');
+                select.innerHTML = '';
+                if (servers.length !== 1) {
+                    select.appendChild(new Option('', ''));
+                }
+
+                servers.forEach(function (server) {
+                    select.appendChild(new Option(server.Name, server.Id));
+                });
+
+                if (servers.some(function (server) { return server.Id === selectedId; })) {
+                    select.value = selectedId;
+                }
+            }
+
+            document.querySelector('#TracearrTest')
+                .addEventListener('click', function () {
+                    var result = document.querySelector('#TracearrTestResult');
+                    result.textContent = 'Testing…';
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('OriginalDateAdded/Tracearr/Test'),
+                        data: JSON.stringify({
+                            Url: document.querySelector('#TracearrUrl').value.trim(),
+                            ApiKey: document.querySelector('#TracearrApiKey').value.trim()
+                        }),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    }).then(function (response) {
+                        result.textContent = response.Message;
+                        if (response.Success) {
+                            setTracearrServers(response.Servers, document.querySelector('#TracearrServerId').value);
+                        }
+                    }, function () {
+                        result.textContent = 'The test request failed.';
+                    });
+                });
+
             document.querySelector('#OriginalDateAddedConfigPage')
                 .addEventListener('pageshow', function() {
                     Dashboard.showLoadingMsg();
@@ -48,6 +117,12 @@
                         document.querySelector('#ReplacementWindowDays').value = config.ReplacementWindowDays;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#VerboseLogging').checked = config.VerboseLogging;
+                        document.querySelector('#TracearrEnabled').checked = config.TracearrEnabled;
+                        document.querySelector('#TracearrUrl').value = config.TracearrUrl;
+                        document.querySelector('#TracearrApiKey').value = config.TracearrApiKey;
+                        setTracearrServers(
+                            config.TracearrServerId ? [{ Id: config.TracearrServerId, Name: config.TracearrServerName }] : [],
+                            config.TracearrServerId);
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -59,6 +134,12 @@
                     config.ReplacementWindowDays = parseInt(document.querySelector('#ReplacementWindowDays').value, 10);
                     config.DryRun = document.querySelector('#DryRun').checked;
                     config.VerboseLogging = document.querySelector('#VerboseLogging').checked;
+                    config.TracearrEnabled = document.querySelector('#TracearrEnabled').checked;
+                    config.TracearrUrl = document.querySelector('#TracearrUrl').value.trim();
+                    config.TracearrApiKey = document.querySelector('#TracearrApiKey').value.trim();
+                    var server = document.querySelector('#TracearrServerId');
+                    config.TracearrServerId = server.value;
+                    config.TracearrServerName = server.selectedIndex >= 0 ? server.options[server.selectedIndex].text : '';
                     ApiClient.updatePluginConfiguration(OriginalDateAddedConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
