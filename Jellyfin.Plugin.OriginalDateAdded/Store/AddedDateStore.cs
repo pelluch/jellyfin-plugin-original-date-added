@@ -48,6 +48,14 @@ public sealed class AddedDateStore : IDisposable
         }
     }
 
+    public IReadOnlyList<KeyValuePair<Guid, ItemEntry>> GetItems()
+    {
+        lock (_dataLock)
+        {
+            return _data.Items.ToList();
+        }
+    }
+
     public void SetItem(Guid itemId, ItemEntry entry)
     {
         entry = entry with { Date = AsUtc(entry.Date), Original = AsUtc(entry.Original) };
