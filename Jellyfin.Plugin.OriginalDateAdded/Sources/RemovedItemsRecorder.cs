@@ -117,6 +117,21 @@ public sealed class RemovedItemsRecorder : IHostedService
                     continue;
                 }
 
+                if (PluginSettings.DryRun)
+                {
+                    _logger.LogInformation(
+                        "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}, after {RemovedName} ({RemovedId}) was removed",
+                        successor.Name,
+                        successor.Id,
+                        decision.Entry.Date,
+                        decision.Entry.Source,
+                        decision.Detail,
+                        decision.Entry.Original,
+                        removed.Name,
+                        removed.Id);
+                    continue;
+                }
+
                 _store.SetItem(successor.Id, decision.Entry);
                 _logger.LogInformation(
                     "Date added of {Name} ({ItemId}) is {Date} from {Source} ({Detail}), scanned as {Original}, applied after {RemovedName} ({RemovedId}) was removed",

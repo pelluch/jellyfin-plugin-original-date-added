@@ -33,7 +33,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
         => FetchAsync((BaseItem)item, cancellationToken);
 
     public bool HasChanged(BaseItem item, IDirectoryService directoryService)
-        => _store.GetItem(item.Id) is { } entry && item.DateCreated != entry.Date;
+        => !PluginSettings.DryRun && _store.GetItem(item.Id) is { } entry && item.DateCreated != entry.Date;
 
     private async Task<ItemUpdateType> FetchAsync(BaseItem item, CancellationToken cancellationToken)
     {
@@ -46,10 +46,23 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
 
             if (item.DateLastRefreshed == DateTime.MinValue)
             {
-                _logger.LogDebug("First refresh of {Name} ({ItemId})", item.Name, item.Id);
+                _logger.Log(PluginSettings.DetailLevel, "First refresh of {Name} ({ItemId})", item.Name, item.Id);
                 var decisions = await _resolver.ResolveAsync([item], cancellationToken).ConfigureAwait(false);
                 if (decisions.TryGetValue(item.Id, out var decision))
                 {
+                    if (PluginSettings.DryRun)
+                    {
+                        _logger.LogInformation(
+                            "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}",
+                            item.Name,
+                            item.Id,
+                            decision.Entry.Date,
+                            decision.Entry.Source,
+                            decision.Detail,
+                            decision.Entry.Original);
+                        return ItemUpdateType.None;
+                    }
+
                     _store.SetItem(item.Id, decision.Entry);
                     _logger.LogInformation(
                         "Date added of {Name} ({ItemId}) is {Date} from {Source} ({Detail}), scanned as {Original}",
@@ -62,7 +75,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                 }
                 else
                 {
-                    _logger.LogDebug("No earlier date added found for {Name} ({ItemId})", item.Name, item.Id);
+                    _logger.Log(PluginSettings.DetailLevel, "No earlier date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
             }
 
@@ -72,7 +85,13 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                 return ItemUpdateType.None;
             }
 
-            _logger.LogDebug("Setting date added of {Name} ({ItemId}) from {Current} to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
+            if (PluginSettings.DryRun)
+            {
+                _logger.LogInformation("Dry run: would set date added of {Name} ({ItemId}) from {Current} back to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
+                return ItemUpdateType.None;
+            }
+
+            _logger.Log(PluginSettings.DetailLevel, "Setting date added of {Name} ({ItemId}) from {Current} to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
             item.DateCreated = entry.Date;
             return ItemUpdateType.MetadataEdit;
         }

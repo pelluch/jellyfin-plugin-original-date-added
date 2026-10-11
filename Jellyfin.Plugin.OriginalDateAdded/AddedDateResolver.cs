@@ -53,7 +53,8 @@ public class AddedDateResolver
 
                 if (candidate.AddedAt >= original)
                 {
-                    _logger.LogDebug(
+                    _logger.Log(
+                        PluginSettings.DetailLevel,
                         "Item {ItemId}: rejected {Date} from {Source} ({Detail}), not earlier than {Original}",
                         itemId,
                         candidate.AddedAt,
@@ -65,7 +66,8 @@ public class AddedDateResolver
 
                 if (candidate.PredecessorRemovedAt is { } removedAt && original - removedAt > window)
                 {
-                    _logger.LogDebug(
+                    _logger.Log(
+                        PluginSettings.DetailLevel,
                         "Item {ItemId}: rejected {Date} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
                         itemId,
                         candidate.AddedAt,

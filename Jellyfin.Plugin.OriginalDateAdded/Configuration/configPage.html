@@ -14,6 +14,20 @@
                         <input id="ReplacementWindowDays" name="ReplacementWindowDays" type="number" is="emby-input" min="0" required />
                         <div class="fieldDescription">Maximum number of days that can pass between an item being removed and its replacement being scanned in before it is no longer eligible for an added date update. Beyond this, the item's replacement will get added to "Recently Added" as per the logic without this plugin.</div>
                     </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="DryRun" name="DryRun" type="checkbox" is="emby-checkbox" />
+                            <span>Dry run</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Log what would change without changing any date added. Removed items are still recorded in the plugin's internal data, but no Jellyfin metadata changes occur.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="VerboseLogging" name="VerboseLogging" type="checkbox" is="emby-checkbox" />
+                            <span>Verbose logging</span>
+                        </label>
+                        <div class="fieldDescription checkboxFieldDescription">Log debug logs</div>
+                    </div>
                     <div>
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
@@ -32,6 +46,8 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                         document.querySelector('#ReplacementWindowDays').value = config.ReplacementWindowDays;
+                        document.querySelector('#DryRun').checked = config.DryRun;
+                        document.querySelector('#VerboseLogging').checked = config.VerboseLogging;
                         Dashboard.hideLoadingMsg();
                     });
                 });
@@ -41,6 +57,8 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                     config.ReplacementWindowDays = parseInt(document.querySelector('#ReplacementWindowDays').value, 10);
+                    config.DryRun = document.querySelector('#DryRun').checked;
+                    config.VerboseLogging = document.querySelector('#VerboseLogging').checked;
                     ApiClient.updatePluginConfiguration(OriginalDateAddedConfig.pluginUniqueId, config).then(function (result) {
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
