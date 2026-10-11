@@ -46,8 +46,33 @@ public class AddedDateResolver
 
             foreach (var (itemId, candidate) in candidates)
             {
-                if (!originals.TryGetValue(itemId, out var original) || !IsAcceptable(candidate, original, window))
+                if (!originals.TryGetValue(itemId, out var original))
                 {
+                    continue;
+                }
+
+                if (candidate.AddedAt >= original)
+                {
+                    _logger.LogDebug(
+                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), not earlier than {Original}",
+                        itemId,
+                        candidate.AddedAt,
+                        source.Name,
+                        candidate.Detail,
+                        original);
+                    continue;
+                }
+
+                if (candidate.PredecessorRemovedAt is { } removedAt && original - removedAt > window)
+                {
+                    _logger.LogDebug(
+                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
+                        itemId,
+                        candidate.AddedAt,
+                        source.Name,
+                        candidate.Detail,
+                        (original - removedAt).TotalDays,
+                        window.TotalDays);
                     continue;
                 }
 
@@ -60,8 +85,4 @@ public class AddedDateResolver
 
         return best;
     }
-
-    private static bool IsAcceptable(AddedDateCandidate candidate, DateTime original, TimeSpan window)
-        => candidate.AddedAt < original
-            && (candidate.PredecessorRemovedAt is not { } removedAt || original - removedAt <= window);
 }

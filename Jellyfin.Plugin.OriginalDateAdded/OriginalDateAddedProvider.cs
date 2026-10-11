@@ -60,6 +60,10 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                         decision.Detail,
                         decision.Entry.Original);
                 }
+                else
+                {
+                    _logger.LogDebug("No earlier date added found for {Name} ({ItemId})", item.Name, item.Id);
+                }
             }
 
             var entry = _store.GetItem(item.Id);
