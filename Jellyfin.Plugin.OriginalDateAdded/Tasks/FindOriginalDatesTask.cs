@@ -41,12 +41,13 @@ public class FindOriginalDatesTask : IScheduledTask
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        var itemsToCheck = PluginSettings.Configuration.ItemsToCheck;
         var items = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 IsVirtualItem = false,
                 OrderBy = [(ItemSortBy.DateCreated, SortOrder.Descending)],
-                Limit = PluginSettings.Configuration.ItemsToCheck,
+                Limit = itemsToCheck > 0 ? itemsToCheck : null,
             })
             .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
             .ToList();
