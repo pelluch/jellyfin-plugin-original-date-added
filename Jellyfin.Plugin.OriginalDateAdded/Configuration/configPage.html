@@ -38,6 +38,20 @@
                         <div class="fieldDescription checkboxFieldDescription">Increases log verbosity.</div>
                     </div>
                     <div class="verticalSection">
+                        <h2 class="sectionTitle">Sonarr / Radarr</h2>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="ArrEnabled" name="ArrEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Use Sonarr and Radarr</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled, movies and episodes managed by Sonarr or Radarr get their date added from Sonarr's and Radarr's import history. Currently, the plugin requires Jellyfin seeing them at the same path.</div>
+                        </div>
+                        <div id="ArrInstances"></div>
+                        <button is="emby-button" type="button" id="ArrAdd" class="raised emby-button">
+                            <span>Add instance</span>
+                        </button>
+                    </div>
+                    <div class="verticalSection">
                         <h2 class="sectionTitle">Tracearr</h2>
                         <div class="checkboxContainer checkboxContainer-withDescription">
                             <label class="emby-checkbox-label">
@@ -113,6 +127,63 @@
                 pluginUniqueId: '8b0cb393-ba1e-4589-9b1d-1044945e96c4'
             };
 
+            var arrInstanceCount = 0;
+
+            function addArrInstance(instance) {
+                var id = arrInstanceCount++;
+                var row = document.createElement('div');
+                row.className = 'arrInstance';
+                row.style.marginBottom = '1.8em';
+                row.innerHTML =
+                    '<div class="inputContainer">' +
+                        '<label class="inputLabel inputLabelUnfocused" for="ArrUrl' + id + '">URL</label>' +
+                        '<input id="ArrUrl' + id + '" class="arrUrl" type="url" is="emby-input" placeholder="https://sonarr.example.com" />' +
+                    '</div>' +
+                    '<div class="inputContainer">' +
+                        '<label class="inputLabel inputLabelUnfocused" for="ArrApiKey' + id + '">API key</label>' +
+                        '<input id="ArrApiKey' + id + '" class="arrApiKey" type="password" is="emby-input" autocomplete="off" />' +
+                        '<div class="fieldDescription">Settings → General → API Key in Sonarr or Radarr.</div>' +
+                    '</div>' +
+                    '<div>' +
+                        '<button is="emby-button" type="button" class="raised emby-button arrTest"><span>Test</span></button>' +
+                        '<button is="emby-button" type="button" class="raised emby-button arrRemove"><span>Remove</span></button>' +
+                        '<div class="fieldDescription arrTestResult"></div>' +
+                    '</div>';
+                document.querySelector('#ArrInstances').appendChild(row);
+                row.querySelector('.arrUrl').value = instance.Url;
+                row.querySelector('.arrApiKey').value = instance.ApiKey;
+                row.querySelector('.arrRemove').addEventListener('click', function () {
+                    row.remove();
+                });
+                row.querySelector('.arrTest').addEventListener('click', function () {
+                    var result = row.querySelector('.arrTestResult');
+                    result.textContent = 'Testing…';
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('OriginalDateAdded/Arr/Test'),
+                        data: JSON.stringify(readArrInstance(row)),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    }).then(function (response) {
+                        result.textContent = response.Message;
+                    }, function () {
+                        result.textContent = 'The test request failed.';
+                    });
+                });
+            }
+
+            function readArrInstance(row) {
+                return {
+                    Url: row.querySelector('.arrUrl').value.trim(),
+                    ApiKey: row.querySelector('.arrApiKey').value.trim()
+                };
+            }
+
+            function readArrInstances() {
+                return Array.prototype.map.call(document.querySelectorAll('.arrInstance'), readArrInstance)
+                    .filter(function (instance) { return instance.Url || instance.ApiKey; });
+            }
+
             function setTracearrServers(servers, selectedId) {
                 var select = document.querySelector('#TracearrServerId');
                 select.innerHTML = '';
@@ -128,6 +199,11 @@
                     select.value = selectedId;
                 }
             }
+
+            document.querySelector('#ArrAdd')
+                .addEventListener('click', function () {
+                    addArrInstance({ Url: '', ApiKey: '' });
+                });
 
             document.querySelector('#ClearData')
                 .addEventListener('click', function () {
@@ -208,6 +284,9 @@
                         document.querySelector('#ItemsToCheck').value = config.ItemsToCheck;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#VerboseLogging').checked = config.VerboseLogging;
+                        document.querySelector('#ArrEnabled').checked = config.ArrEnabled;
+                        document.querySelector('#ArrInstances').innerHTML = '';
+                        (config.ArrInstances.length ? config.ArrInstances : [{ Url: '', ApiKey: '' }]).forEach(addArrInstance);
                         document.querySelector('#TracearrEnabled').checked = config.TracearrEnabled;
                         document.querySelector('#TracearrUrl').value = config.TracearrUrl;
                         document.querySelector('#TracearrApiKey').value = config.TracearrApiKey;
@@ -229,6 +308,8 @@
                     config.ItemsToCheck = parseInt(document.querySelector('#ItemsToCheck').value, 10);
                     config.DryRun = document.querySelector('#DryRun').checked;
                     config.VerboseLogging = document.querySelector('#VerboseLogging').checked;
+                    config.ArrEnabled = document.querySelector('#ArrEnabled').checked;
+                    config.ArrInstances = readArrInstances();
                     config.TracearrEnabled = document.querySelector('#TracearrEnabled').checked;
                     config.TracearrUrl = document.querySelector('#TracearrUrl').value.trim();
                     config.TracearrApiKey = document.querySelector('#TracearrApiKey').value.trim();

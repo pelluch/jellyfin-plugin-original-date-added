@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.OriginalDateAdded.Arr;
 using Jellyfin.Plugin.OriginalDateAdded.Jellystat;
 using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
@@ -22,5 +23,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService<RemovedItemsRecorder>();
         serviceCollection.AddSingleton<TracearrClient>();
         serviceCollection.AddSingleton<JellystatClient>();
+        serviceCollection.AddSingleton<ArrClient>();
+        serviceCollection.AddSingleton<ArrTester>();
     }
 }
