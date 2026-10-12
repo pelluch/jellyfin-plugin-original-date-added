@@ -26,7 +26,7 @@ public class RemovedItemsSource : IAddedDateSource
             var entry = _store.FindRemoved(ItemIdentity.ContentKeys(item), item.GetBaseItemKind());
             if (entry is not null)
             {
-                candidates[item.Id] = new AddedDateCandidate(entry.Date, entry.RemovedAt, "removed item with the same content keys");
+                candidates[item.Id] = new AddedDateCandidate(entry.AddedAt, entry.RemovedAt, "removed item with the same content keys");
             }
         }
 

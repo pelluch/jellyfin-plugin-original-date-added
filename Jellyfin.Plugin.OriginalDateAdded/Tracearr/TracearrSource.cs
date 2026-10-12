@@ -48,7 +48,7 @@ public class TracearrSource : IAddedDateSource
         var window = PluginSettings.ReplacementWindow;
         for (var i = 0; i < items.Count; i++)
         {
-            var (item, original) = items[i];
+            var (item, scannedAt) = items[i];
             if (!ItemIdentity.IsSupported(item))
             {
                 continue;
@@ -75,7 +75,7 @@ public class TracearrSource : IAddedDateSource
             var removedCopies = copies
                 .Where(copy => copy.ServerId == config.TracearrServerId && IsGoneFromJellyfin(copy, item, reference))
                 .ToList();
-            if (FollowChain(removedCopies, original, window, reference) is { } candidate)
+            if (FollowChain(removedCopies, scannedAt, window, reference) is { } candidate)
             {
                 candidates[item.Id] = candidate;
             }
@@ -92,12 +92,12 @@ public class TracearrSource : IAddedDateSource
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 
-    private AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime original, TimeSpan window, string reference)
+    private AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime scannedAt, TimeSpan window, string reference)
     {
         TracearrCopy? first = null;
         TracearrCopy? earliest = null;
         var links = 0;
-        var appearedAt = original;
+        var appearedAt = scannedAt;
         while (copies
             .Where(copy => copy.AddedAt <= appearedAt - AddedDateResolver.MinimumDifference && (copy.RemovedAt is not { } removedAt || appearedAt - removedAt <= window))
             .MinBy(copy => copy.AddedAt) is { } link)

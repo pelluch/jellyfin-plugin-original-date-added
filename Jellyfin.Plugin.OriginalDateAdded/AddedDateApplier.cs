@@ -28,7 +28,7 @@ public class AddedDateApplier
 
         if (!dryRun)
         {
-            item.DateCreated = decision.Entry.Date;
+            item.DateCreated = decision.Entry.AddedAt;
             await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         }
 
@@ -38,7 +38,7 @@ public class AddedDateApplier
     public bool Record(BaseItem item, AddedDateDecision decision, string reason, bool dryRun)
     {
         var entry = decision.Entry;
-        if (entry.Date > item.DateCreated - AddedDateResolver.MinimumDifference || (_store.GetItem(item.Id) is { } stored && stored.Date <= entry.Date))
+        if (entry.AddedAt > item.DateCreated - AddedDateResolver.MinimumDifference || (_store.GetItem(item.Id) is { } stored && stored.AddedAt <= entry.AddedAt))
         {
             return false;
         }
@@ -46,26 +46,26 @@ public class AddedDateApplier
         if (dryRun)
         {
             _logger.LogInformation(
-                "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}, {Reason}",
+                "Dry run: would set date added of {Name} ({ItemId}) to {AddedAt} from {Source} ({Detail}), scanned as {ScannedAt}, {Reason}",
                 item.Name,
                 item.Id,
-                entry.Date,
+                entry.AddedAt,
                 entry.Source,
                 decision.Detail,
-                entry.Original,
+                entry.ScannedAt,
                 reason);
             return true;
         }
 
         _store.SetItem(item.Id, entry);
         _logger.LogInformation(
-            "Date added of {Name} ({ItemId}) is {Date} from {Source} ({Detail}), scanned as {Original}, {Reason}",
+            "Date added of {Name} ({ItemId}) is {AddedAt} from {Source} ({Detail}), scanned as {ScannedAt}, {Reason}",
             item.Name,
             item.Id,
-            entry.Date,
+            entry.AddedAt,
             entry.Source,
             decision.Detail,
-            entry.Original,
+            entry.ScannedAt,
             reason);
         return true;
     }

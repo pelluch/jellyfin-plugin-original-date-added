@@ -23,6 +23,7 @@ public sealed class AddedDateStore : IDisposable
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter() },
         WriteIndented = true,
+        RespectRequiredConstructorParameters = true,
     };
 
     private readonly ILogger<AddedDateStore> _logger;
@@ -61,7 +62,7 @@ public sealed class AddedDateStore : IDisposable
 
     public void SetItem(Guid itemId, ItemEntry entry)
     {
-        entry = entry with { Date = AsUtc(entry.Date), Original = AsUtc(entry.Original) };
+        entry = entry with { AddedAt = AsUtc(entry.AddedAt), ScannedAt = AsUtc(entry.ScannedAt) };
         lock (_dataLock)
         {
             if (_data.Items.GetValueOrDefault(itemId) == entry)
@@ -87,7 +88,7 @@ public sealed class AddedDateStore : IDisposable
 
     public void AddRemoved(IEnumerable<string> keys, RemovedEntry entry, DateTime expiredBefore)
     {
-        entry = entry with { Date = AsUtc(entry.Date), RemovedAt = AsUtc(entry.RemovedAt) };
+        entry = entry with { AddedAt = AsUtc(entry.AddedAt), RemovedAt = AsUtc(entry.RemovedAt) };
         expiredBefore = AsUtc(expiredBefore);
         lock (_dataLock)
         {
@@ -99,7 +100,7 @@ public sealed class AddedDateStore : IDisposable
                 {
                     _data.Removed[key] = entry with
                     {
-                        Date = existing.Date < entry.Date ? existing.Date : entry.Date,
+                        AddedAt = existing.AddedAt < entry.AddedAt ? existing.AddedAt : entry.AddedAt,
                         RemovedAt = existing.RemovedAt > entry.RemovedAt ? existing.RemovedAt : entry.RemovedAt,
                     };
                 }
@@ -120,7 +121,7 @@ public sealed class AddedDateStore : IDisposable
             return keys
                 .Select(key => _data.Removed.GetValueOrDefault(key))
                 .Where(entry => entry is not null && entry.ItemType == itemType)
-                .MinBy(entry => entry!.Date);
+                .MinBy(entry => entry!.AddedAt);
         }
     }
 

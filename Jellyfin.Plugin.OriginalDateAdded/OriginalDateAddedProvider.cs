@@ -35,7 +35,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
         => FetchAsync(item, cancellationToken);
 
     public bool HasChanged(BaseItem item, IDirectoryService directoryService)
-        => !PluginSettings.DryRun && _store.GetItem(item.Id) is { } entry && item.DateCreated != entry.Date;
+        => !PluginSettings.DryRun && _store.GetItem(item.Id) is { } entry && item.DateCreated != entry.AddedAt;
 
     private async Task<ItemUpdateType> FetchAsync(BaseItem item, CancellationToken cancellationToken)
     {
@@ -62,19 +62,19 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
             }
 
             var entry = _store.GetItem(item.Id);
-            if (entry is null || item.DateCreated == entry.Date)
+            if (entry is null || item.DateCreated == entry.AddedAt)
             {
                 return ItemUpdateType.None;
             }
 
             if (dryRun)
             {
-                _logger.LogInformation("Dry run: would set date added of {Name} ({ItemId}) from {Current} back to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
+                _logger.LogInformation("Dry run: would set date added of {Name} ({ItemId}) from {Current} back to {AddedAt}", item.Name, item.Id, item.DateCreated, entry.AddedAt);
                 return ItemUpdateType.None;
             }
 
-            _logger.Log(PluginSettings.DetailLevel, "Setting date added of {Name} ({ItemId}) from {Current} to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
-            item.DateCreated = entry.Date;
+            _logger.Log(PluginSettings.DetailLevel, "Setting date added of {Name} ({ItemId}) from {Current} to {AddedAt}", item.Name, item.Id, item.DateCreated, entry.AddedAt);
+            item.DateCreated = entry.AddedAt;
             return ItemUpdateType.MetadataEdit;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

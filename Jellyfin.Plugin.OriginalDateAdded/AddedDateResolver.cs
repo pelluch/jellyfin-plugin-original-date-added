@@ -30,9 +30,9 @@ public class AddedDateResolver
         var window = PluginSettings.ReplacementWindow;
         var sourceItems = items
             .DistinctBy(item => item.Id)
-            .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.Original ?? item.DateCreated))
+            .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
             .ToList();
-        var originals = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.Original);
+        var scannedDates = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
         var best = new Dictionary<Guid, AddedDateDecision>();
 
         foreach (var source in _sources)
@@ -50,41 +50,41 @@ public class AddedDateResolver
 
             foreach (var (itemId, candidate) in candidates)
             {
-                if (!originals.TryGetValue(itemId, out var original))
+                if (!scannedDates.TryGetValue(itemId, out var scannedAt))
                 {
                     continue;
                 }
 
-                if (candidate.AddedAt > original - MinimumDifference)
+                if (candidate.AddedAt > scannedAt - MinimumDifference)
                 {
                     _logger.Log(
                         PluginSettings.DetailLevel,
-                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), not at least a minute earlier than {Original}",
+                        "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), not at least a minute earlier than {ScannedAt}",
                         itemId,
                         candidate.AddedAt,
                         source.Name,
                         candidate.Detail,
-                        original);
+                        scannedAt);
                     continue;
                 }
 
-                if (candidate.PredecessorRemovedAt is { } removedAt && original - removedAt > window)
+                if (candidate.PredecessorRemovedAt is { } removedAt && scannedAt - removedAt > window)
                 {
                     _logger.Log(
                         PluginSettings.DetailLevel,
-                        "Item {ItemId}: rejected {Date} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
+                        "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
                         itemId,
                         candidate.AddedAt,
                         source.Name,
                         candidate.Detail,
-                        (original - removedAt).TotalDays,
+                        (scannedAt - removedAt).TotalDays,
                         window.TotalDays);
                     continue;
                 }
 
-                if (!best.TryGetValue(itemId, out var current) || candidate.AddedAt < current.Entry.Date)
+                if (!best.TryGetValue(itemId, out var current) || candidate.AddedAt < current.Entry.AddedAt)
                 {
-                    best[itemId] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, original), candidate.Detail);
+                    best[itemId] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, scannedAt), candidate.Detail);
                 }
             }
         }

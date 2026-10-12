@@ -43,16 +43,16 @@ public class RevertToScannedDatesTask : IScheduledTask
             cancellationToken.ThrowIfCancellationRequested();
             var (itemId, entry) = entries[i];
             var item = _libraryManager.GetItemById(itemId);
-            if (item is not null && item.DateCreated != entry.Original)
+            if (item is not null && item.DateCreated != entry.ScannedAt)
             {
                 if (PluginSettings.DryRun)
                 {
-                    _logger.LogInformation("Dry run: would revert date added of {Name} ({ItemId}) from {Date} to {Original}", item.Name, itemId, item.DateCreated, entry.Original);
+                    _logger.LogInformation("Dry run: would revert date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
                 }
                 else
                 {
-                    _logger.LogInformation("Reverting date added of {Name} ({ItemId}) from {Date} to {Original}", item.Name, itemId, item.DateCreated, entry.Original);
-                    item.DateCreated = entry.Original;
+                    _logger.LogInformation("Reverting date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
+                    item.DateCreated = entry.ScannedAt;
                     await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
                 }
 
