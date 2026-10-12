@@ -146,7 +146,7 @@ public sealed class AddedDateStore : IDisposable
             lock (_dataLock)
             {
                 var backupPath = string.Create(CultureInfo.InvariantCulture, $"{_path}.cleared-{DateTime.UtcNow:yyyyMMddHHmmss}");
-                WriteAtomically(backupPath, JsonSerializer.Serialize(_data, _jsonOptions));
+                WriteAtomically(backupPath, JsonSerializer.SerializeToUtf8Bytes(_data, _jsonOptions));
                 var backups = Directory.GetFiles(Path.GetDirectoryName(_path)!, Path.GetFileName(_path) + ".cleared-*")
                     .Order(StringComparer.Ordinal)
                     .SkipLast(BackupsToKeep);
@@ -170,10 +170,15 @@ public sealed class AddedDateStore : IDisposable
         Write();
     }
 
-    private static void WriteAtomically(string path, string contents)
+    private static void WriteAtomically(string path, byte[] contents)
     {
         var tempPath = path + ".tmp";
-        File.WriteAllText(tempPath, contents);
+        using (var stream = File.Create(tempPath))
+        {
+            stream.Write(contents);
+            stream.Flush(flushToDisk: true);
+        }
+
         File.Move(tempPath, path, overwrite: true);
     }
 
@@ -214,7 +219,7 @@ public sealed class AddedDateStore : IDisposable
     {
         lock (_writeLock)
         {
-            string json;
+            byte[] json;
             lock (_dataLock)
             {
                 if (!_writePending)
@@ -223,7 +228,7 @@ public sealed class AddedDateStore : IDisposable
                 }
 
                 _writePending = false;
-                json = JsonSerializer.Serialize(_data, _jsonOptions);
+                json = JsonSerializer.SerializeToUtf8Bytes(_data, _jsonOptions);
             }
 
             try
