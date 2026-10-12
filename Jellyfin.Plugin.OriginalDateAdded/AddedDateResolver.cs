@@ -30,28 +30,59 @@ public class AddedDateResolver
 
     public async Task<IReadOnlyDictionary<Guid, AddedDateDecision>> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
-        var window = PluginSettings.ReplacementWindow;
         var serverSetUpAt = _serverSetup.Date;
         var sourceItems = items
             .DistinctBy(item => item.Id)
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
             .ToList();
-        var scannedDates = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
-        var best = new Dictionary<Guid, AddedDateDecision>();
+        var decisions = new Dictionary<Guid, AddedDateDecision>();
+        await AddAuthoritativeDecisionsAsync(sourceItems, serverSetUpAt, decisions, cancellationToken).ConfigureAwait(false);
 
-        foreach (var source in _sources)
+        var authoritativeSources = _sources.Where(source => source.IsAuthoritative).Select(source => source.Name).ToHashSet(StringComparer.Ordinal);
+        var undecided = sourceItems
+            .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
+                && !(_store.GetItem(sourceItem.Item.Id) is { } stored && authoritativeSources.Contains(stored.Source))) // its authoritative source didn't answer this time, e.g. it's down
+            .ToList();
+        await AddEarliestDecisionsAsync(undecided, serverSetUpAt, decisions, cancellationToken).ConfigureAwait(false);
+        return decisions;
+    }
+
+    private static (DateTime AddedAt, string Detail) ClampToServerSetUp(AddedDateCandidate candidate, DateTime? serverSetUpAt)
+        => serverSetUpAt is { } setUpAt && candidate.AddedAt < setUpAt
+            ? (setUpAt, string.Create(CultureInfo.InvariantCulture, $"{candidate.Detail}, {candidate.AddedAt:u} is before this server was set up"))
+            : (candidate.AddedAt, candidate.Detail);
+
+    private async Task AddAuthoritativeDecisionsAsync(
+        List<SourceItem> sourceItems,
+        DateTime? serverSetUpAt,
+        Dictionary<Guid, AddedDateDecision> decisions,
+        CancellationToken cancellationToken)
+    {
+        foreach (var source in _sources.Where(source => source.IsAuthoritative))
         {
-            IReadOnlyDictionary<Guid, AddedDateCandidate> candidates;
-            try
+            var pending = sourceItems.Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)).ToList();
+            var candidates = await GetCandidatesAsync(source, pending, cancellationToken).ConfigureAwait(false);
+            foreach (var (item, scannedAt) in pending)
             {
-                candidates = await source.GetCandidatesAsync(sourceItems, cancellationToken).ConfigureAwait(false);
+                if (candidates.TryGetValue(item.Id, out var candidate))
+                {
+                    var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
+                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail, IsAuthoritative: true);
+                }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogError(ex, "Source {Source} failed", source.Name);
-                continue;
-            }
+        }
+    }
 
+    private async Task AddEarliestDecisionsAsync(
+        List<SourceItem> sourceItems,
+        DateTime? serverSetUpAt,
+        Dictionary<Guid, AddedDateDecision> decisions,
+        CancellationToken cancellationToken)
+    {
+        var scannedDates = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
+        foreach (var source in _sources.Where(source => !source.IsAuthoritative))
+        {
+            var candidates = await GetCandidatesAsync(source, sourceItems, cancellationToken).ConfigureAwait(false);
             foreach (var (itemId, candidate) in candidates)
             {
                 if (!scannedDates.TryGetValue(itemId, out var scannedAt))
@@ -59,48 +90,77 @@ public class AddedDateResolver
                     continue;
                 }
 
-                if (candidate.AddedAt > scannedAt - MinimumDifference)
+                var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
+                if (serverSetUpAt is { } setUpAt && scannedAt < setUpAt)
                 {
-                    _logger.Log(
-                        PluginSettings.DetailLevel,
-                        "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), not at least a minute earlier than {ScannedAt}",
-                        itemId,
-                        candidate.AddedAt,
-                        source.Name,
-                        candidate.Detail,
-                        scannedAt);
+                    // The item's own date can't be right, so any record of its content gives it the setup date.
+                    if (addedAt > setUpAt)
+                    {
+                        detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, this item's date {scannedAt:u} is before this server was set up");
+                        addedAt = setUpAt;
+                    }
+                }
+                else if (!IsAcceptable(itemId, candidate, source.Name, scannedAt))
+                {
                     continue;
                 }
 
-                if (candidate.PredecessorRemovedAt is { } removedAt && scannedAt - removedAt > window)
+                if (!decisions.TryGetValue(itemId, out var current) || addedAt < current.Entry.AddedAt)
                 {
-                    _logger.Log(
-                        PluginSettings.DetailLevel,
-                        "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
-                        itemId,
-                        candidate.AddedAt,
-                        source.Name,
-                        candidate.Detail,
-                        (scannedAt - removedAt).TotalDays,
-                        window.TotalDays);
-                    continue;
-                }
-
-                var addedAt = candidate.AddedAt;
-                var detail = candidate.Detail;
-                if (serverSetUpAt is { } setUpAt && addedAt < setUpAt)
-                {
-                    detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, {addedAt:u} is before this server was set up");
-                    addedAt = setUpAt;
-                }
-
-                if (!best.TryGetValue(itemId, out var current) || addedAt < current.Entry.AddedAt)
-                {
-                    best[itemId] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail);
+                    decisions[itemId] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail);
                 }
             }
         }
+    }
 
-        return best;
+    private bool IsAcceptable(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt)
+    {
+        if (candidate.AddedAt > scannedAt - MinimumDifference)
+        {
+            _logger.Log(
+                PluginSettings.DetailLevel,
+                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), not at least a minute earlier than {ScannedAt}",
+                itemId,
+                candidate.AddedAt,
+                sourceName,
+                candidate.Detail,
+                scannedAt);
+            return false;
+        }
+
+        var window = PluginSettings.ReplacementWindow;
+        if (candidate.PredecessorRemovedAt is { } removedAt && scannedAt - removedAt > window)
+        {
+            _logger.Log(
+                PluginSettings.DetailLevel,
+                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
+                itemId,
+                candidate.AddedAt,
+                sourceName,
+                candidate.Detail,
+                (scannedAt - removedAt).TotalDays,
+                window.TotalDays);
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IAddedDateSource source, List<SourceItem> items, CancellationToken cancellationToken)
+    {
+        if (items.Count == 0)
+        {
+            return new Dictionary<Guid, AddedDateCandidate>();
+        }
+
+        try
+        {
+            return await source.GetCandidatesAsync(items, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Source {Source} failed", source.Name);
+            return new Dictionary<Guid, AddedDateCandidate>();
+        }
     }
 }

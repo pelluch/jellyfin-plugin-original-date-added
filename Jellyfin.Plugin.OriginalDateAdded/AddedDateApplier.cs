@@ -39,10 +39,7 @@ public class AddedDateApplier
 
     public bool Record(BaseItem item, AddedDateDecision decision, string reason, bool dryRun)
     {
-        var entry = decision.Entry;
-        var isEarlier = entry.AddedAt <= item.DateCreated - AddedDateResolver.MinimumDifference;
-        var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date; // can't be right, so a later decision may replace it
-        if (!(isEarlier || isBeforeServerSetUp) || (_store.GetItem(item.Id) is { } stored && stored.AddedAt <= entry.AddedAt))
+        if (!IsChange(item, decision))
         {
             return false;
         }
@@ -53,6 +50,7 @@ public class AddedDateApplier
             return false;
         }
 
+        var entry = decision.Entry;
         if (dryRun)
         {
             _logger.LogInformation(
@@ -78,5 +76,19 @@ public class AddedDateApplier
             entry.ScannedAt,
             reason);
         return true;
+    }
+
+    private bool IsChange(BaseItem item, AddedDateDecision decision)
+    {
+        var addedAt = decision.Entry.AddedAt;
+        var stored = _store.GetItem(item.Id);
+        if (decision.IsAuthoritative)
+        {
+            return (addedAt - item.DateCreated).Duration() >= AddedDateResolver.MinimumDifference && stored?.AddedAt != addedAt;
+        }
+
+        var isEarlier = addedAt <= item.DateCreated - AddedDateResolver.MinimumDifference;
+        var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date;
+        return (isEarlier || isBeforeServerSetUp) && !(stored is not null && stored.AddedAt <= addedAt);
     }
 }
