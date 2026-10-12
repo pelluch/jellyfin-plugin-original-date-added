@@ -10,11 +10,13 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 public class AddedDateApplier
 {
     private readonly AddedDateStore _store;
+    private readonly ServerSetup _serverSetup;
     private readonly ILogger<AddedDateApplier> _logger;
 
-    public AddedDateApplier(AddedDateStore store, ILogger<AddedDateApplier> logger)
+    public AddedDateApplier(AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateApplier> logger)
     {
         _store = store;
+        _serverSetup = serverSetup;
         _logger = logger;
     }
 
@@ -38,7 +40,9 @@ public class AddedDateApplier
     public bool Record(BaseItem item, AddedDateDecision decision, string reason, bool dryRun)
     {
         var entry = decision.Entry;
-        if (entry.AddedAt > item.DateCreated - AddedDateResolver.MinimumDifference || (_store.GetItem(item.Id) is { } stored && stored.AddedAt <= entry.AddedAt))
+        var isEarlier = entry.AddedAt <= item.DateCreated - AddedDateResolver.MinimumDifference;
+        var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date; // can't be right, so a later decision may replace it
+        if (!(isEarlier || isBeforeServerSetUp) || (_store.GetItem(item.Id) is { } stored && stored.AddedAt <= entry.AddedAt))
         {
             return false;
         }

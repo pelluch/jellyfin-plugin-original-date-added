@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,18 +17,21 @@ public class AddedDateResolver
 
     private readonly IEnumerable<IAddedDateSource> _sources;
     private readonly AddedDateStore _store;
+    private readonly ServerSetup _serverSetup;
     private readonly ILogger<AddedDateResolver> _logger;
 
-    public AddedDateResolver(IEnumerable<IAddedDateSource> sources, AddedDateStore store, ILogger<AddedDateResolver> logger)
+    public AddedDateResolver(IEnumerable<IAddedDateSource> sources, AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateResolver> logger)
     {
         _sources = sources;
         _store = store;
+        _serverSetup = serverSetup;
         _logger = logger;
     }
 
     public async Task<IReadOnlyDictionary<Guid, AddedDateDecision>> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
         var window = PluginSettings.ReplacementWindow;
+        var serverSetUpAt = _serverSetup.Date;
         var sourceItems = items
             .DistinctBy(item => item.Id)
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
@@ -82,9 +86,17 @@ public class AddedDateResolver
                     continue;
                 }
 
-                if (!best.TryGetValue(itemId, out var current) || candidate.AddedAt < current.Entry.AddedAt)
+                var addedAt = candidate.AddedAt;
+                var detail = candidate.Detail;
+                if (serverSetUpAt is { } setUpAt && addedAt < setUpAt)
                 {
-                    best[itemId] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, scannedAt), candidate.Detail);
+                    detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, {addedAt:u} is before this server was set up");
+                    addedAt = setUpAt;
+                }
+
+                if (!best.TryGetValue(itemId, out var current) || addedAt < current.Entry.AddedAt)
+                {
+                    best[itemId] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail);
                 }
             }
         }

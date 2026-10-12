@@ -119,7 +119,7 @@ public class TracearrClient
                     throw new TracearrException(response.StatusCode switch
                     {
                         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Tracearr rejected the API key",
-                            HttpStatusCode.TooManyRequests => "Tracearr's rate limit was still exceeded after retrying",
+                        HttpStatusCode.TooManyRequests =>"Tracearr's rate limit was still exceeded after retrying",
                         _ => string.Create(CultureInfo.InvariantCulture, $"Tracearr returned HTTP {(int)response.StatusCode}"),
                     });
                 }
