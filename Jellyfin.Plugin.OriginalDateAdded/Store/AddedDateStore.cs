@@ -85,14 +85,17 @@ public sealed class AddedDateStore : IDisposable
         }
     }
 
-    public void AddRemoved(IEnumerable<string> keys, RemovedEntry entry)
+    public void AddRemoved(IEnumerable<string> keys, RemovedEntry entry, DateTime expiredBefore)
     {
         entry = entry with { Date = AsUtc(entry.Date), RemovedAt = AsUtc(entry.RemovedAt) };
+        expiredBefore = AsUtc(expiredBefore);
         lock (_dataLock)
         {
             foreach (var key in keys)
             {
-                if (_data.Removed.TryGetValue(key, out var existing) && existing.ItemType == entry.ItemType)
+                // The expiry check is needed for combined  entries, since a combined entry
+                // takes this removal's time, letting expired dates pass the window.
+                if (_data.Removed.TryGetValue(key, out var existing) && existing.ItemType == entry.ItemType && existing.RemovedAt >= expiredBefore)
                 {
                     _data.Removed[key] = entry with
                     {

@@ -96,7 +96,9 @@ public sealed class RemovedItemsRecorder : IHostedService
             return;
         }
 
-        _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, DateTime.UtcNow, item.GetBaseItemKind()));
+        var removedAt = DateTime.UtcNow;
+        var window = TimeSpan.FromDays(Plugin.Instance!.Configuration.ReplacementWindowDays);
+        _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, removedAt, item.GetBaseItemKind()), expiredBefore: removedAt - window);
         if (SuccessorQuery(item) is { } query)
         {
             _ = Task.Run(() => UpdateRefreshedSuccessorsAsync(item, keys, query));
