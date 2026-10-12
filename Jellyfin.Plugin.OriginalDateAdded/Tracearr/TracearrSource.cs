@@ -84,7 +84,14 @@ public class TracearrSource : IAddedDateSource
         return candidates;
     }
 
-    private static AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime original, TimeSpan window, string reference)
+    private static string ReferenceName(MetadataProvider provider) => provider switch
+    {
+        MetadataProvider.Tmdb => "tmdb",
+        MetadataProvider.Imdb => "imdb",
+        _ => "tvdb",
+    };
+
+    private AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime original, TimeSpan window, string reference)
     {
         TracearrCopy? first = null;
         TracearrCopy? earliest = null;
@@ -100,17 +107,24 @@ public class TracearrSource : IAddedDateSource
             links++;
         }
 
+        foreach (var copy in copies)
+        {
+            if (copy.AddedAt <= appearedAt - AddedDateResolver.MinimumDifference && copy.RemovedAt is { } removedAt)
+            {
+                _logger.Log(
+                    PluginSettings.DetailLevel,
+                    "Tracearr {Reference}: copy added {AddedAt} was removed {Days:F1} days before the next copy appeared, window is {WindowDays} days, skipped",
+                    reference,
+                    copy.AddedAt,
+                    (appearedAt - removedAt).TotalDays,
+                    window.TotalDays);
+            }
+        }
+
         return earliest is null
             ? null
             : new AddedDateCandidate(earliest.AddedAt, first!.RemovedAt, string.Create(CultureInfo.InvariantCulture, $"Tracearr {reference}, {links} earlier copies"));
     }
-
-    private static string ReferenceName(MetadataProvider provider) => provider switch
-    {
-        MetadataProvider.Tmdb => "tmdb",
-        MetadataProvider.Imdb => "imdb",
-        _ => "tvdb",
-    };
 
     private bool IsGoneFromJellyfin(TracearrCopy copy, BaseItem item, string reference)
     {
