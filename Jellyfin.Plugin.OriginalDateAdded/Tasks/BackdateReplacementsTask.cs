@@ -12,16 +12,16 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Tasks;
 
-public class FindOriginalDatesTask : IScheduledTask
+public class BackdateReplacementsTask : IScheduledTask
 {
     private const int ChunkSize = 25;
 
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateResolver _resolver;
     private readonly AddedDateApplier _applier;
-    private readonly ILogger<FindOriginalDatesTask> _logger;
+    private readonly ILogger<BackdateReplacementsTask> _logger;
 
-    public FindOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, ILogger<FindOriginalDatesTask> logger)
+    public BackdateReplacementsTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, ILogger<BackdateReplacementsTask> logger)
     {
         _libraryManager = libraryManager;
         _resolver = resolver;
@@ -29,11 +29,11 @@ public class FindOriginalDatesTask : IScheduledTask
         _logger = logger;
     }
 
-    public string Name => "Find original dates added";
+    public string Name => "Backdate replacements";
 
-    public string Key => "OriginalDateAddedFindOriginalDates";
+    public string Key => "OriginalDateAddedBackdateReplacements";
 
-    public string Description => "Looks up the most recently added movies and episodes in every source and gives them an earlier date added where one is found. Locked items are skipped.";
+    public string Description => "Gives movies and episodes that replaced an earlier copy that copy's date added. Checks the newest items, as many as Items to check in the plugin settings (0 = all). Locked items are skipped.";
 
     public string Category => "Original Date Added";
 
@@ -52,7 +52,7 @@ public class FindOriginalDatesTask : IScheduledTask
             })
             .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
             .ToList();
-        _logger.LogInformation("Finding original dates added for {Count} items", items.Count);
+        _logger.LogInformation("Backdating replacements: checking {Count} items", items.Count);
 
         var updated = 0;
         for (var start = 0; start < items.Count; start += ChunkSize)
@@ -63,7 +63,7 @@ public class FindOriginalDatesTask : IScheduledTask
             foreach (var item in chunk)
             {
                 if (decisions.TryGetValue(item.Id, out var decision)
-                    && await _applier.ApplyAsync(item, decision, "by the Find original dates added task", cancellationToken).ConfigureAwait(false))
+                    && await _applier.ApplyAsync(item, decision, "by the Backdate replacements task", cancellationToken).ConfigureAwait(false))
                 {
                     updated++;
                 }
