@@ -26,7 +26,7 @@ public class RevertToScannedDatesTask : IScheduledTask
 
     public string Key => "OriginalDateAddedRevertToScannedDates";
 
-    public string Description => "Sets every date added this plugin changed back to the date Jellyfin scanned the file in, and forgets those changes.";
+    public string Description => "Sets every date added this plugin changed back to the date Jellyfin scanned the file in, and forgets those changes. Locked items keep their current date.";
 
     public string Category => "Original Date Added";
 
@@ -45,18 +45,25 @@ public class RevertToScannedDatesTask : IScheduledTask
             var item = _libraryManager.GetItemById(itemId);
             if (item is not null && item.DateCreated != entry.ScannedAt)
             {
-                if (PluginSettings.DryRun)
+                if (item.IsLocked)
                 {
-                    _logger.LogInformation("Dry run: would revert date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
+                    _logger.LogInformation("Leaving date added of {Name} ({ItemId}) at {Current}, the item is locked", item.Name, itemId, item.DateCreated);
                 }
                 else
                 {
-                    _logger.LogInformation("Reverting date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
-                    item.DateCreated = entry.ScannedAt;
-                    await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
-                }
+                    if (PluginSettings.DryRun)
+                    {
+                        _logger.LogInformation("Dry run: would revert date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Reverting date added of {Name} ({ItemId}) from {Current} to {ScannedAt}", item.Name, itemId, item.DateCreated, entry.ScannedAt);
+                        item.DateCreated = entry.ScannedAt;
+                        await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+                    }
 
-                reverted++;
+                    reverted++;
+                }
             }
 
             if (!PluginSettings.DryRun)

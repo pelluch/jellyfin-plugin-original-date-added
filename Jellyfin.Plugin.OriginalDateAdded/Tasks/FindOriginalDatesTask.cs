@@ -33,7 +33,7 @@ public class FindOriginalDatesTask : IScheduledTask
 
     public string Key => "OriginalDateAddedFindOriginalDates";
 
-    public string Description => "Looks up the most recently added movies and episodes in every source and gives them an earlier date added where one is found.";
+    public string Description => "Looks up the most recently added movies and episodes in every source and gives them an earlier date added where one is found. Locked items are skipped.";
 
     public string Category => "Original Date Added";
 
@@ -46,6 +46,7 @@ public class FindOriginalDatesTask : IScheduledTask
             {
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 IsVirtualItem = false,
+                IsLocked = false,
                 OrderBy = [(ItemSortBy.DateCreated, SortOrder.Descending)],
                 Limit = itemsToCheck > 0 ? itemsToCheck : null,
             })

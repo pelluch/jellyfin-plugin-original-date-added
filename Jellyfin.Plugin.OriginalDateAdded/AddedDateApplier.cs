@@ -43,6 +43,12 @@ public class AddedDateApplier
             return false;
         }
 
+        if (item.IsLocked)
+        {
+            _logger.Log(PluginSettings.DetailLevel, "Leaving date added of {Name} ({ItemId}) as it is, the item is locked", item.Name, item.Id);
+            return false;
+        }
+
         if (dryRun)
         {
             _logger.LogInformation(
