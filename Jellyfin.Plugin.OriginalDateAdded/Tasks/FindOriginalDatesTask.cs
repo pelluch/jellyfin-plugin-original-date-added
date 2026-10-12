@@ -48,7 +48,7 @@ public class FindOriginalDatesTask : IScheduledTask
                 OrderBy = [(ItemSortBy.DateCreated, SortOrder.Descending)],
                 Limit = Plugin.Instance!.Configuration.ItemsToCheck,
             })
-            .Where(item => ItemIdentity.IsSupported(item) && item.DateLastRefreshed != DateTime.MinValue)
+            .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
             .ToList();
         _logger.LogInformation("Finding original dates added for {Count} items", items.Count);
 

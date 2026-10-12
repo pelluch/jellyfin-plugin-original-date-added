@@ -47,7 +47,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
             }
 
             var dryRun = PluginSettings.DryRun;
-            if (item.DateLastRefreshed == DateTime.MinValue)
+            if (!ItemIdentity.HasBeenRefreshed(item))
             {
                 _logger.Log(PluginSettings.DetailLevel, "First refresh of {Name} ({ItemId})", item.Name, item.Id);
                 var decisions = await _resolver.ResolveAsync([item], cancellationToken).ConfigureAwait(false);

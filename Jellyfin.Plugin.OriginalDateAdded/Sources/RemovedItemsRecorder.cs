@@ -5,13 +5,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
-using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
 using MediaBrowser.Controller.Entities;
-using MediaBrowser.Controller.Entities.Movies;
-using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -68,36 +64,6 @@ public sealed class RemovedItemsRecorder : BackgroundService
         }
     }
 
-    // All versions of an item that were added after it
-    private static InternalItemsQuery? SuccessorQuery(BaseItem item)
-    {
-        switch (item)
-        {
-            case Movie:
-                var ids = new Dictionary<string, string>();
-                foreach (var provider in new[] { MetadataProvider.Tmdb, MetadataProvider.Imdb })
-                {
-                    if (item.TryGetProviderId(provider, out var id))
-                    {
-                        ids[provider.ToString()] = id;
-                    }
-                }
-
-                return new InternalItemsQuery { IncludeItemTypes = [BaseItemKind.Movie], IsVirtualItem = false, HasAnyProviderId = ids };
-            case Episode { ParentIndexNumber: { } season, IndexNumber: { } number } episode:
-                return new InternalItemsQuery
-                {
-                    IncludeItemTypes = [BaseItemKind.Episode],
-                    IsVirtualItem = false,
-                    AncestorIds = [episode.SeriesId],
-                    ParentIndexNumber = season,
-                    IndexNumber = number,
-                };
-            default:
-                return null;
-        }
-    }
-
     private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
     {
         var item = e.Item;
@@ -116,7 +82,7 @@ public sealed class RemovedItemsRecorder : BackgroundService
         var removedAt = DateTime.UtcNow;
         var window = TimeSpan.FromDays(Plugin.Instance!.Configuration.ReplacementWindowDays);
         _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, removedAt, item.GetBaseItemKind()), expiredBefore: removedAt - window);
-        if (SuccessorQuery(item) is { } query)
+        if (ItemIdentity.SameContentQuery(item) is { } query)
         {
             _removals.Writer.TryWrite(new Removal(item, keys, query));
         }
@@ -125,8 +91,7 @@ public sealed class RemovedItemsRecorder : BackgroundService
     private async Task UpdateRefreshedSuccessorsAsync(Removal removal, CancellationToken cancellationToken)
     {
         var successors = _libraryManager.GetItemList(removal.Query)
-            .Where(item => item.DateLastRefreshed != DateTime.MinValue // items that already have had their first refresh
-                && ItemIdentity.ContentKeys(item).Intersect(removal.Keys).Any())
+            .Where(item => ItemIdentity.HasBeenRefreshed(item) && ItemIdentity.ContentKeys(item).Intersect(removal.Keys).Any())
             .ToList();
         if (successors.Count == 0)
         {
