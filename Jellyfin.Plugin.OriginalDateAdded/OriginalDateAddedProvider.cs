@@ -14,12 +14,14 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustomMetadataProvider<Episode>, IHasItemChangeMonitor
 {
     private readonly AddedDateResolver _resolver;
+    private readonly AddedDateApplier _applier;
     private readonly AddedDateStore _store;
     private readonly ILogger<OriginalDateAddedProvider> _logger;
 
-    public OriginalDateAddedProvider(AddedDateResolver resolver, AddedDateStore store, ILogger<OriginalDateAddedProvider> logger)
+    public OriginalDateAddedProvider(AddedDateResolver resolver, AddedDateApplier applier, AddedDateStore store, ILogger<OriginalDateAddedProvider> logger)
     {
         _resolver = resolver;
+        _applier = applier;
         _store = store;
         _logger = logger;
     }
@@ -27,10 +29,10 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
     public string Name => "Original Date Added";
 
     public Task<ItemUpdateType> FetchAsync(Movie item, MetadataRefreshOptions options, CancellationToken cancellationToken)
-        => FetchAsync((BaseItem)item, cancellationToken);
+        => FetchAsync(item, cancellationToken);
 
     public Task<ItemUpdateType> FetchAsync(Episode item, MetadataRefreshOptions options, CancellationToken cancellationToken)
-        => FetchAsync((BaseItem)item, cancellationToken);
+        => FetchAsync(item, cancellationToken);
 
     public bool HasChanged(BaseItem item, IDirectoryService directoryService)
         => !PluginSettings.DryRun && _store.GetItem(item.Id) is { } entry && item.DateCreated != entry.Date;
@@ -44,34 +46,14 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                 return ItemUpdateType.None;
             }
 
+            var dryRun = PluginSettings.DryRun;
             if (item.DateLastRefreshed == DateTime.MinValue)
             {
                 _logger.Log(PluginSettings.DetailLevel, "First refresh of {Name} ({ItemId})", item.Name, item.Id);
                 var decisions = await _resolver.ResolveAsync([item], cancellationToken).ConfigureAwait(false);
                 if (decisions.TryGetValue(item.Id, out var decision))
                 {
-                    if (PluginSettings.DryRun)
-                    {
-                        _logger.LogInformation(
-                            "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}",
-                            item.Name,
-                            item.Id,
-                            decision.Entry.Date,
-                            decision.Entry.Source,
-                            decision.Detail,
-                            decision.Entry.Original);
-                        return ItemUpdateType.None;
-                    }
-
-                    _store.SetItem(item.Id, decision.Entry);
-                    _logger.LogInformation(
-                        "Date added of {Name} ({ItemId}) is {Date} from {Source} ({Detail}), scanned as {Original}",
-                        item.Name,
-                        item.Id,
-                        decision.Entry.Date,
-                        decision.Entry.Source,
-                        decision.Detail,
-                        decision.Entry.Original);
+                    _applier.Record(item, decision, "at first refresh", dryRun);
                 }
                 else
                 {
@@ -85,7 +67,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                 return ItemUpdateType.None;
             }
 
-            if (PluginSettings.DryRun)
+            if (dryRun)
             {
                 _logger.LogInformation("Dry run: would set date added of {Name} ({ItemId}) from {Current} back to {Date}", item.Name, item.Id, item.DateCreated, entry.Date);
                 return ItemUpdateType.None;

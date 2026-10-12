@@ -20,13 +20,30 @@ public class AddedDateApplier
 
     public async Task<bool> ApplyAsync(BaseItem item, AddedDateDecision decision, string reason, CancellationToken cancellationToken)
     {
+        var dryRun = PluginSettings.DryRun;
+        if (!Record(item, decision, reason, dryRun))
+        {
+            return false;
+        }
+
+        if (!dryRun)
+        {
+            item.DateCreated = decision.Entry.Date;
+            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
+
+    public bool Record(BaseItem item, AddedDateDecision decision, string reason, bool dryRun)
+    {
         var entry = decision.Entry;
         if (entry.Date > item.DateCreated - AddedDateResolver.MinimumDifference || (_store.GetItem(item.Id) is { } stored && stored.Date <= entry.Date))
         {
             return false;
         }
 
-        if (PluginSettings.DryRun)
+        if (dryRun)
         {
             _logger.LogInformation(
                 "Dry run: would set date added of {Name} ({ItemId}) to {Date} from {Source} ({Detail}), scanned as {Original}, {Reason}",
@@ -50,8 +67,6 @@ public class AddedDateApplier
             decision.Detail,
             entry.Original,
             reason);
-        item.DateCreated = entry.Date;
-        await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         return true;
     }
 }
