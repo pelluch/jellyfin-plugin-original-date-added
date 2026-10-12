@@ -33,18 +33,19 @@ public class TracearrClient
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<TracearrServer>> GetJellyfinServersAsync(string url, string apiKey, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TracearrServer>> GetJellyfinServersAsync(TracearrConnection connection, CancellationToken cancellationToken)
     {
-        var response = await GetAsync<ServersResponse>(url, apiKey, "/servers", false, cancellationToken).ConfigureAwait(false);
-        return (response!.Data ?? [])
+        var response = await GetAsync<ServersResponse>(connection, "/servers", cancellationToken).ConfigureAwait(false)
+            ?? throw new TracearrException("Tracearr's public API was not found at this URL");
+        return (response.Data ?? [])
             .Where(server => server.ServerType == "jellyfin")
             .Select(server => new TracearrServer(server.ServerId, server.ServerName))
             .ToList();
     }
 
-    public async Task<IReadOnlyList<TracearrCopy>?> GetCopiesAsync(string url, string apiKey, string reference, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TracearrCopy>?> GetCopiesAsync(TracearrConnection connection, string reference, CancellationToken cancellationToken)
     {
-        var media = await GetAsync<MediaDto>(url, apiKey, "/media/" + Uri.EscapeDataString(reference), true, cancellationToken).ConfigureAwait(false);
+        var media = await GetAsync<MediaDto>(connection, "/media/" + Uri.EscapeDataString(reference), cancellationToken).ConfigureAwait(false);
         if (media is null)
         {
             return null;
@@ -63,9 +64,9 @@ public class TracearrClient
         return copies;
     }
 
-    public async Task<IReadOnlyList<TracearrChild>> GetChildrenAsync(string url, string apiKey, string reference, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TracearrChild>> GetChildrenAsync(TracearrConnection connection, string reference, CancellationToken cancellationToken)
     {
-        var response = await GetAsync<ChildrenResponse>(url, apiKey, "/media/" + Uri.EscapeDataString(reference) + "/children", true, cancellationToken).ConfigureAwait(false);
+        var response = await GetAsync<ChildrenResponse>(connection, "/media/" + Uri.EscapeDataString(reference) + "/children", cancellationToken).ConfigureAwait(false);
         return (response?.Data ?? [])
             .Select(child => new TracearrChild(child.Id, child.SeasonNumber, child.EpisodeNumber))
             .ToList();
@@ -79,10 +80,10 @@ public class TracearrClient
         return delay < TimeSpan.Zero ? TimeSpan.Zero : delay > _maxRetryDelay ? _maxRetryDelay : delay;
     }
 
-    private async Task<T?> GetAsync<T>(string url, string apiKey, string path, bool notFoundAsNull, CancellationToken cancellationToken)
+    private async Task<T?> GetAsync<T>(TracearrConnection connection, string path, CancellationToken cancellationToken)
         where T : class
     {
-        if (!Uri.TryCreate(url.TrimEnd('/') + "/api/v2/public" + path, UriKind.Absolute, out var uri)
+        if (!Uri.TryCreate(connection.Url.TrimEnd('/') + "/api/v2/public" + path, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             throw new TracearrException("The Tracearr URL is not a valid http(s) URL");
@@ -93,7 +94,7 @@ public class TracearrClient
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_timeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connection.ApiKey);
 
             try
             {
@@ -108,7 +109,7 @@ public class TracearrClient
                     continue;
                 }
 
-                if (notFoundAsNull && response.StatusCode == HttpStatusCode.NotFound)
+                if (response.StatusCode == HttpStatusCode.NotFound)
                 {
                     return null;
                 }
@@ -118,8 +119,7 @@ public class TracearrClient
                     throw new TracearrException(response.StatusCode switch
                     {
                         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Tracearr rejected the API key",
-                        HttpStatusCode.NotFound => "Tracearr's public API was not found at this URL",
-                        HttpStatusCode.TooManyRequests => "Tracearr's rate limit was still exceeded after retrying",
+                            HttpStatusCode.TooManyRequests => "Tracearr's rate limit was still exceeded after retrying",
                         _ => string.Create(CultureInfo.InvariantCulture, $"Tracearr returned HTTP {(int)response.StatusCode}"),
                     });
                 }

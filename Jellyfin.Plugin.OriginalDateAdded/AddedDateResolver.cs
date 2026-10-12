@@ -27,7 +27,7 @@ public class AddedDateResolver
 
     public async Task<IReadOnlyDictionary<Guid, AddedDateDecision>> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
-        var window = TimeSpan.FromDays(Plugin.Instance!.Configuration.ReplacementWindowDays);
+        var window = PluginSettings.ReplacementWindow;
         var sourceItems = items
             .DistinctBy(item => item.Id)
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.Original ?? item.DateCreated))

@@ -142,12 +142,17 @@ public sealed class AddedDateStore : IDisposable
         }
     }
 
-    public (int Items, int Removed, string BackupPath) ClearWithBackup()
+    public (int Items, int Removed, string? BackupPath) ClearWithBackup()
     {
         lock (_writeLock)
         {
             lock (_dataLock)
             {
+                if (_data.Items.Count == 0 && _data.Removed.Count == 0)
+                {
+                    return (0, 0, null);
+                }
+
                 var backupPath = string.Create(CultureInfo.InvariantCulture, $"{_path}.cleared-{DateTime.UtcNow:yyyyMMddHHmmss}");
                 WriteAtomically(backupPath, JsonSerializer.SerializeToUtf8Bytes(_data, _jsonOptions));
                 var backups = Directory.GetFiles(Path.GetDirectoryName(_path)!, Path.GetFileName(_path) + ".cleared-*")
@@ -202,7 +207,7 @@ public sealed class AddedDateStore : IDisposable
         }
         catch (JsonException ex)
         {
-            var corruptPath = $"{_path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            var corruptPath = string.Create(CultureInfo.InvariantCulture, $"{_path}.corrupt-{DateTime.UtcNow:yyyyMMddHHmmss}");
             File.Move(_path, corruptPath);
             _logger.LogError(ex, "Could not read {Path}, moved it to {CorruptPath} and starting with an empty store", _path, corruptPath);
             return new StoreData();

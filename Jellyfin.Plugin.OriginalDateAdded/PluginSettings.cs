@@ -1,10 +1,16 @@
+using System;
+using Jellyfin.Plugin.OriginalDateAdded.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded;
 
 internal static class PluginSettings
 {
-    public static bool DryRun => Plugin.Instance!.Configuration.DryRun;
+    public static PluginConfiguration Configuration => Plugin.Instance!.Configuration;
 
-    public static LogLevel DetailLevel => Plugin.Instance!.Configuration.VerboseLogging ? LogLevel.Information : LogLevel.Debug;
+    public static bool DryRun => Configuration.DryRun;
+
+    public static LogLevel DetailLevel => Configuration.VerboseLogging ? LogLevel.Information : LogLevel.Debug;
+
+    public static TimeSpan ReplacementWindow => TimeSpan.FromDays(Configuration.ReplacementWindowDays);
 }

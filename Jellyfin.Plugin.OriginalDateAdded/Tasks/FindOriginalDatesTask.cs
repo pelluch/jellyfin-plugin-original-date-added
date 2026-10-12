@@ -46,7 +46,7 @@ public class FindOriginalDatesTask : IScheduledTask
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 IsVirtualItem = false,
                 OrderBy = [(ItemSortBy.DateCreated, SortOrder.Descending)],
-                Limit = Plugin.Instance!.Configuration.ItemsToCheck,
+                Limit = PluginSettings.Configuration.ItemsToCheck,
             })
             .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
             .ToList();

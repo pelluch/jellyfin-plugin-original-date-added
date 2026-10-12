@@ -116,7 +116,9 @@
                                 url: ApiClient.getUrl('OriginalDateAdded/Data/Clear'),
                                 dataType: 'json'
                             }).then(function (response) {
-                                result.textContent = 'Cleared ' + response.Items + ' dates and ' + response.Removed + ' removed items. Backup: ' + response.BackupFile;
+                                result.textContent = response.BackupFile
+                                    ? 'Cleared ' + response.Items + ' dates and ' + response.Removed + ' removed items. Backup: ' + response.BackupFile
+                                    : 'Nothing to clear.';
                             }, function () {
                                 result.textContent = 'Clearing failed, so nothing was cleared. See the server log.';
                             });

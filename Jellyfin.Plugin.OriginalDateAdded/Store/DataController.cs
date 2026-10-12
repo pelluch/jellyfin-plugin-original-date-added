@@ -10,12 +10,12 @@ namespace Jellyfin.Plugin.OriginalDateAdded.Store;
 [ApiController]
 [Route("OriginalDateAdded/Data")]
 [Authorize(Policy = Policies.RequiresElevation)]
-public class StoreController : ControllerBase
+public class DataController : ControllerBase
 {
     private readonly AddedDateStore _store;
-    private readonly ILogger<StoreController> _logger;
+    private readonly ILogger<DataController> _logger;
 
-    public StoreController(AddedDateStore store, ILogger<StoreController> logger)
+    public DataController(AddedDateStore store, ILogger<DataController> logger)
     {
         _store = store;
         _logger = logger;
@@ -27,6 +27,11 @@ public class StoreController : ControllerBase
         try
         {
             var (items, removed, backupPath) = _store.ClearWithBackup();
+            if (backupPath is null)
+            {
+                return new ClearDataResult(0, 0, null);
+            }
+
             _logger.LogInformation(
                 "Cleared {Items} item entries and {Removed} removed-item entries, backup saved to {BackupPath}; dates added in Jellyfin were not changed",
                 items,

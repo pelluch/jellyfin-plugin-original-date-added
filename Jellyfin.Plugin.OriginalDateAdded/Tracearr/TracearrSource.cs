@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Jellyfin.Plugin.OriginalDateAdded.Configuration;
 using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
@@ -35,7 +34,7 @@ public class TracearrSource : IAddedDateSource
 
     public async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
-        var config = Plugin.Instance!.Configuration;
+        var config = PluginSettings.Configuration;
         var candidates = new Dictionary<Guid, AddedDateCandidate>();
         if (!config.TracearrEnabled
             || string.IsNullOrEmpty(config.TracearrUrl)
@@ -45,7 +44,8 @@ public class TracearrSource : IAddedDateSource
             return candidates;
         }
 
-        var window = TimeSpan.FromDays(config.ReplacementWindowDays);
+        var connection = new TracearrConnection(config.TracearrUrl, config.TracearrApiKey);
+        var window = PluginSettings.ReplacementWindow;
         for (var i = 0; i < items.Count; i++)
         {
             var (item, original) = items[i];
@@ -58,7 +58,7 @@ public class TracearrSource : IAddedDateSource
             IReadOnlyList<TracearrCopy>? copies;
             try
             {
-                (reference, copies) = await FindCopiesAsync(item, config, cancellationToken).ConfigureAwait(false);
+                (reference, copies) = await FindCopiesAsync(item, connection, cancellationToken).ConfigureAwait(false);
             }
             catch (TracearrException ex)
             {
@@ -88,7 +88,8 @@ public class TracearrSource : IAddedDateSource
     {
         MetadataProvider.Tmdb => "tmdb",
         MetadataProvider.Imdb => "imdb",
-        _ => "tvdb",
+        MetadataProvider.Tvdb => "tvdb",
+        _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
 
     private AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime original, TimeSpan window, string reference)
@@ -147,7 +148,7 @@ public class TracearrSource : IAddedDateSource
         return false;
     }
 
-    private async Task<(string Reference, IReadOnlyList<TracearrCopy>? Copies)> FindCopiesAsync(BaseItem item, PluginConfiguration config, CancellationToken cancellationToken)
+    private async Task<(string Reference, IReadOnlyList<TracearrCopy>? Copies)> FindCopiesAsync(BaseItem item, TracearrConnection connection, CancellationToken cancellationToken)
     {
         var (type, providers) = item is Episode ? ("episode", _episodeProviders) : ("movie", _movieProviders);
         foreach (var provider in providers)
@@ -155,7 +156,7 @@ public class TracearrSource : IAddedDateSource
             if (item.TryGetProviderId(provider, out var id))
             {
                 var reference = $"{type}:{ReferenceName(provider)}:{id}";
-                var copies = await _client.GetCopiesAsync(config.TracearrUrl, config.TracearrApiKey, reference, cancellationToken).ConfigureAwait(false);
+                var copies = await _client.GetCopiesAsync(connection, reference, cancellationToken).ConfigureAwait(false);
                 if (copies is not null)
                 {
                     return (reference, copies);
@@ -165,7 +166,7 @@ public class TracearrSource : IAddedDateSource
 
         if (item is Episode { Series: { } series, ParentIndexNumber: { } season, IndexNumber: { } number })
         {
-            return await FindEpisodeThroughShowAsync(series, season, number, config, cancellationToken).ConfigureAwait(false);
+            return await FindEpisodeThroughShowAsync(series, season, number, connection, cancellationToken).ConfigureAwait(false);
         }
 
         return (string.Empty, null);
@@ -175,7 +176,7 @@ public class TracearrSource : IAddedDateSource
         Series series,
         int season,
         int number,
-        PluginConfiguration config,
+        TracearrConnection connection,
         CancellationToken cancellationToken)
     {
         foreach (var provider in _showProviders)
@@ -186,19 +187,19 @@ public class TracearrSource : IAddedDateSource
             }
 
             var show = $"show:{ReferenceName(provider)}:{id}";
-            var seasons = await _client.GetChildrenAsync(config.TracearrUrl, config.TracearrApiKey, show, cancellationToken).ConfigureAwait(false);
+            var seasons = await _client.GetChildrenAsync(connection, show, cancellationToken).ConfigureAwait(false);
             if (seasons.FirstOrDefault(child => child.SeasonNumber == season) is not { } seasonChild)
             {
                 continue;
             }
 
-            var episodes = await _client.GetChildrenAsync(config.TracearrUrl, config.TracearrApiKey, seasonChild.Id, cancellationToken).ConfigureAwait(false);
+            var episodes = await _client.GetChildrenAsync(connection, seasonChild.Id, cancellationToken).ConfigureAwait(false);
             if (episodes.FirstOrDefault(child => child.EpisodeNumber == number) is not { } episodeChild)
             {
                 continue;
             }
 
-            var copies = await _client.GetCopiesAsync(config.TracearrUrl, config.TracearrApiKey, episodeChild.Id, cancellationToken).ConfigureAwait(false);
+            var copies = await _client.GetCopiesAsync(connection, episodeChild.Id, cancellationToken).ConfigureAwait(false);
             return (string.Create(CultureInfo.InvariantCulture, $"{show} S{season:00}E{number:00}"), copies);
         }
 
