@@ -8,6 +8,10 @@
     <div id="OriginalDateAddedConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
         <div data-role="content">
             <div class="content-primary">
+                <div id="DateAddedBehaviorNotice" class="infoBanner" style="margin-bottom:1.8em;" hidden>
+                    Jellyfin is set to "Use file creation date" as the date added for new content. This plugin is designed for "Use date scanned into the library": with the file creation date, a file replaced under the same name gets a new date added that this plugin doesn't restore.
+                    Change it in <a is="emby-linkbutton" class="button-link" href="#/dashboard/libraries/display">Libraries → Display</a>, "Date added behavior for new content".
+                </div>
                 <form id="OriginalDateAddedConfigForm">
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="ReplacementWindowDays">Replacement window (days)</label>
@@ -61,6 +65,31 @@
                             <label class="selectLabel" for="TracearrServerId">Tracearr server</label>
                             <select is="emby-select" id="TracearrServerId" name="TracearrServerId" class="emby-select-withcolor emby-select"></select>
                             <div class="fieldDescription">Which Tracearr Jellyfin backend corresponds to this server.</div>
+                        </div>
+                    </div>
+                    <div class="verticalSection">
+                        <h2 class="sectionTitle">Jellystat</h2>
+                        <div class="checkboxContainer checkboxContainer-withDescription">
+                            <label class="emby-checkbox-label">
+                                <input id="JellystatEnabled" name="JellystatEnabled" type="checkbox" is="emby-checkbox" />
+                                <span>Use Jellystat</span>
+                            </label>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled, item added dates will also be looked up from Jellystat's history. Jellystat has no provider IDs, so movies and shows are also matched by name and year. It doesn't record when a copy was removed, so the replacement window doesn't apply to its dates: a movie deleted and downloaded again much later gets its old date back.</div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JellystatUrl">URL</label>
+                            <input id="JellystatUrl" name="JellystatUrl" type="url" is="emby-input" placeholder="https://jellystat.example.com" />
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="JellystatApiKey">API key</label>
+                            <input id="JellystatApiKey" name="JellystatApiKey" type="password" is="emby-input" autocomplete="off" />
+                            <div class="fieldDescription">Jellystat API key (Settings → API Keys in Jellystat).</div>
+                        </div>
+                        <div>
+                            <button is="emby-button" type="button" id="JellystatTest" class="raised emby-button">
+                                <span>Test</span>
+                            </button>
+                            <div id="JellystatTestResult" class="fieldDescription"></div>
                         </div>
                     </div>
                     <div>
@@ -148,8 +177,31 @@
                     });
                 });
 
+            document.querySelector('#JellystatTest')
+                .addEventListener('click', function () {
+                    var result = document.querySelector('#JellystatTestResult');
+                    result.textContent = 'Testing…';
+                    ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('OriginalDateAdded/Jellystat/Test'),
+                        data: JSON.stringify({
+                            Url: document.querySelector('#JellystatUrl').value.trim(),
+                            ApiKey: document.querySelector('#JellystatApiKey').value.trim()
+                        }),
+                        contentType: 'application/json',
+                        dataType: 'json'
+                    }).then(function (response) {
+                        result.textContent = response.Message;
+                    }, function () {
+                        result.textContent = 'The test request failed.';
+                    });
+                });
+
             document.querySelector('#OriginalDateAddedConfigPage')
                 .addEventListener('pageshow', function() {
+                    ApiClient.getNamedConfiguration('metadata').then(function (metadata) {
+                        document.querySelector('#DateAddedBehaviorNotice').hidden = !metadata.UseFileCreationTimeForDateAdded;
+                    });
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                         document.querySelector('#ReplacementWindowDays').value = config.ReplacementWindowDays;
@@ -159,6 +211,9 @@
                         document.querySelector('#TracearrEnabled').checked = config.TracearrEnabled;
                         document.querySelector('#TracearrUrl').value = config.TracearrUrl;
                         document.querySelector('#TracearrApiKey').value = config.TracearrApiKey;
+                        document.querySelector('#JellystatEnabled').checked = config.JellystatEnabled;
+                        document.querySelector('#JellystatUrl').value = config.JellystatUrl;
+                        document.querySelector('#JellystatApiKey').value = config.JellystatApiKey;
                         setTracearrServers(
                             config.TracearrServerId ? [{ Id: config.TracearrServerId, Name: config.TracearrServerName }] : [],
                             config.TracearrServerId);
@@ -177,6 +232,9 @@
                     config.TracearrEnabled = document.querySelector('#TracearrEnabled').checked;
                     config.TracearrUrl = document.querySelector('#TracearrUrl').value.trim();
                     config.TracearrApiKey = document.querySelector('#TracearrApiKey').value.trim();
+                    config.JellystatEnabled = document.querySelector('#JellystatEnabled').checked;
+                    config.JellystatUrl = document.querySelector('#JellystatUrl').value.trim();
+                    config.JellystatApiKey = document.querySelector('#JellystatApiKey').value.trim();
                     var server = document.querySelector('#TracearrServerId');
                     config.TracearrServerId = server.value;
                     config.TracearrServerName = server.selectedIndex >= 0 ? server.options[server.selectedIndex].text : '';

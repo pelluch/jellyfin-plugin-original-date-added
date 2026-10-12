@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
@@ -21,6 +22,21 @@ public static class ItemIdentity
         var ownKey = item.Id.ToString();
         return item.GetUserDataKeys().Where(key => key != ownKey).ToList();
     }
+
+    public static bool IsDifferentContent(BaseItem item, BaseItem other)
+    {
+        var keys = ContentKeys(item);
+        var otherKeys = ContentKeys(other);
+        return keys.Count > 0 && otherKeys.Count > 0 && !keys.Intersect(otherKeys).Any();
+    }
+
+    public static string Describe(BaseItem item) => item switch
+    {
+        Episode { ParentIndexNumber: { } season, IndexNumber: { } number } episode
+            => string.Create(CultureInfo.InvariantCulture, $"{episode.SeriesName} S{season:00}E{number:00}"),
+        { ProductionYear: { } year } => string.Create(CultureInfo.InvariantCulture, $"{item.Name} ({year})"),
+        _ => item.Name,
+    };
 
     public static InternalItemsQuery? SameContentQuery(BaseItem item)
     {

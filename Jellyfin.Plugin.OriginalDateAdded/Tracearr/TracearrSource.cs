@@ -72,10 +72,8 @@ public class TracearrSource : IAddedDateSource
                 continue;
             }
 
-            var removedCopies = copies
-                .Where(copy => copy.ServerId == config.TracearrServerId && IsGoneFromJellyfin(copy, item, reference))
-                .ToList();
-            if (FollowChain(removedCopies, scannedAt, window, reference) is { } candidate)
+            if (FindRemovedCopies(copies, item, config.TracearrServerId, reference) is { } removedCopies
+                && FollowChain(removedCopies, scannedAt, window, reference) is { } candidate)
             {
                 candidates[item.Id] = candidate;
             }
@@ -127,25 +125,53 @@ public class TracearrSource : IAddedDateSource
             : new AddedDateCandidate(earliest.AddedAt, first!.RemovedAt, string.Create(CultureInfo.InvariantCulture, $"Tracearr {reference}, {links} earlier copies"));
     }
 
-    private bool IsGoneFromJellyfin(TracearrCopy copy, BaseItem item, string reference)
+    // Null when Tracearr groups the item with different content, which makes all of its copies suspect.
+    private List<TracearrCopy>? FindRemovedCopies(IReadOnlyList<TracearrCopy> copies, BaseItem item, string serverId, string reference)
     {
-        if (copy.RatingKey is null)
+        var removedCopies = new List<TracearrCopy>();
+        foreach (var copy in copies.Where(copy => copy.ServerId == serverId))
         {
-            return true; // replaced copies carry no item ID, and Tracearr only lists them once removed
+            if (copy.RatingKey is null)
+            {
+                removedCopies.Add(copy); // replaced copies carry no item ID, and Tracearr only lists them once removed
+                continue;
+            }
+
+            if (!Guid.TryParse(copy.RatingKey, out var copyId) || copyId == item.Id)
+            {
+                continue;
+            }
+
+            var live = _libraryManager.GetItemById(copyId);
+            if (live is null)
+            {
+                removedCopies.Add(copy);
+            }
+            else if (ItemIdentity.IsDifferentContent(item, live))
+            {
+                _logger.LogInformation(
+                    "Tracearr {Reference} groups {Item} ({ItemId}) with a different item, {Copy} ({CopyId}), so none of its copies are used",
+                    reference,
+                    ItemIdentity.Describe(item),
+                    item.Id,
+                    ItemIdentity.Describe(live),
+                    copyId);
+                return null;
+            }
+            else
+            {
+                _logger.Log(
+                    PluginSettings.DetailLevel,
+                    "Tracearr {Reference}: {Copy} ({CopyId}) is still in Jellyfin, skipped for {Item} ({ItemId})",
+                    reference,
+                    ItemIdentity.Describe(live),
+                    copyId,
+                    ItemIdentity.Describe(item),
+                    item.Id);
+            }
         }
 
-        if (!Guid.TryParse(copy.RatingKey, out var itemId) || itemId == item.Id)
-        {
-            return false;
-        }
-
-        if (_libraryManager.GetItemById(itemId) is null)
-        {
-            return true;
-        }
-
-        _logger.Log(PluginSettings.DetailLevel, "Tracearr {Reference}: copy {CopyId} is still in Jellyfin, skipped", reference, itemId);
-        return false;
+        return removedCopies;
     }
 
     private async Task<(string Reference, IReadOnlyList<TracearrCopy>? Copies)> FindCopiesAsync(BaseItem item, TracearrConnection connection, CancellationToken cancellationToken)
