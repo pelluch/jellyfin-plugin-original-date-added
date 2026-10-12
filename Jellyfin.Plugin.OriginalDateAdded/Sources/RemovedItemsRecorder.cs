@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
+using System.Threading.Channels;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
@@ -16,13 +17,14 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Sources;
 
-public sealed class RemovedItemsRecorder : IHostedService
+public sealed class RemovedItemsRecorder : BackgroundService
 {
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateStore _store;
     private readonly AddedDateResolver _resolver;
     private readonly AddedDateApplier _applier;
     private readonly ILogger<RemovedItemsRecorder> _logger;
+    private readonly Channel<Removal> _removals = Channel.CreateUnbounded<Removal>(new UnboundedChannelOptions { SingleReader = true });
 
     public RemovedItemsRecorder(
         ILibraryManager libraryManager,
@@ -38,17 +40,32 @@ public sealed class RemovedItemsRecorder : IHostedService
         _logger = logger;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
         _store.PruneRemoved(DateTime.UtcNow - TimeSpan.FromDays(Plugin.Instance!.Configuration.ReplacementWindowDays));
         _libraryManager.ItemRemoved += OnItemRemoved;
-        return Task.CompletedTask;
+        return base.StartAsync(cancellationToken);
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public override Task StopAsync(CancellationToken cancellationToken)
     {
         _libraryManager.ItemRemoved -= OnItemRemoved;
-        return Task.CompletedTask;
+        return base.StopAsync(cancellationToken);
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var removal in _removals.Reader.ReadAllAsync(stoppingToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await UpdateRefreshedSuccessorsAsync(removal, stoppingToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested) // an exception escaping ExecuteAsync stops Jellyfin
+            {
+                _logger.LogError(ex, "Could not update the items replacing {Name} ({ItemId})", removal.Item.Name, removal.Item.Id);
+            }
+        }
     }
 
     // All versions of an item that were added after it
@@ -101,36 +118,31 @@ public sealed class RemovedItemsRecorder : IHostedService
         _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, removedAt, item.GetBaseItemKind()), expiredBefore: removedAt - window);
         if (SuccessorQuery(item) is { } query)
         {
-            _ = Task.Run(() => UpdateRefreshedSuccessorsAsync(item, keys, query));
+            _removals.Writer.TryWrite(new Removal(item, keys, query));
         }
     }
 
-    private async Task UpdateRefreshedSuccessorsAsync(BaseItem removed, IReadOnlyList<string> keys, InternalItemsQuery query)
+    private async Task UpdateRefreshedSuccessorsAsync(Removal removal, CancellationToken cancellationToken)
     {
-        try
+        var successors = _libraryManager.GetItemList(removal.Query)
+            .Where(item => item.DateLastRefreshed != DateTime.MinValue // items that already have had their first refresh
+                && ItemIdentity.ContentKeys(item).Intersect(removal.Keys).Any())
+            .ToList();
+        if (successors.Count == 0)
         {
-            var successors = _libraryManager.GetItemList(query)
-                .Where(item => item.DateLastRefreshed != DateTime.MinValue // items that already have had their first refresh
-                    && ItemIdentity.ContentKeys(item).Intersect(keys).Any())
-                .ToList();
-            if (successors.Count == 0)
-            {
-                return;
-            }
-
-            var decisions = await _resolver.ResolveAsync(successors, CancellationToken.None).ConfigureAwait(false);
-            var reason = string.Create(CultureInfo.InvariantCulture, $"after {removed.Name} ({removed.Id}) was removed");
-            foreach (var successor in successors)
-            {
-                if (decisions.TryGetValue(successor.Id, out var decision))
-                {
-                    await _applier.ApplyAsync(successor, decision, reason, CancellationToken.None).ConfigureAwait(false);
-                }
-            }
+            return;
         }
-        catch (Exception ex)
+
+        var decisions = await _resolver.ResolveAsync(successors, cancellationToken).ConfigureAwait(false);
+        var reason = string.Create(CultureInfo.InvariantCulture, $"after {removal.Item.Name} ({removal.Item.Id}) was removed");
+        foreach (var successor in successors)
         {
-            _logger.LogError(ex, "Could not update the items replacing {Name} ({ItemId})", removed.Name, removed.Id);
+            if (decisions.TryGetValue(successor.Id, out var decision))
+            {
+                await _applier.ApplyAsync(successor, decision, reason, cancellationToken).ConfigureAwait(false);
+            }
         }
     }
+
+    private sealed record Removal(BaseItem Item, IReadOnlyList<string> Keys, InternalItemsQuery Query);
 }

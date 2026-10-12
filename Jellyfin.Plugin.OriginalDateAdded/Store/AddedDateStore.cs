@@ -93,7 +93,7 @@ public sealed class AddedDateStore : IDisposable
         {
             foreach (var key in keys)
             {
-                // The expiry check is needed for combined  entries, since a combined entry
+                // The expiry check is needed for combined entries, since a combined entry
                 // takes this removal's time, letting expired dates pass the window.
                 if (_data.Removed.TryGetValue(key, out var existing) && existing.ItemType == entry.ItemType && existing.RemovedAt >= expiredBefore)
                 {
