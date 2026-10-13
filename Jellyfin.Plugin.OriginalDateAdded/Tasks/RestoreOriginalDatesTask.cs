@@ -31,7 +31,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
     public string Name => "Restore original dates added";
 
-    public string Key => "OriginalDateAddedBackdateReplacements"; // the task's earlier name: a new key would lose its run history and triggers
+    public string Key => "OriginalDateAddedRestoreOriginalDates";
 
     public string Description => "Gives movies and episodes the date they were first added: from Sonarr's and Radarr's import history, or from an earlier copy they replaced. Checks the newest items, as many as Items to check in the plugin settings (0 = all). Locked items are skipped.";
 
@@ -45,7 +45,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var itemsToCheck = PluginSettings.Configuration.ItemsToCheck;
-        var itemIds = _libraryManager.GetItemList(new InternalItemsQuery
+        var supported = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 IsVirtualItem = false,
@@ -53,14 +53,18 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 OrderBy = [(ItemSortBy.DateCreated, SortOrder.Descending)],
                 Limit = itemsToCheck > 0 ? itemsToCheck : null,
             })
-            .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
+            .Where(ItemIdentity.IsSupported)
+            .ToList();
+        var itemIds = supported
+            .Where(ItemIdentity.HasBeenRefreshed)
             .OrderBy(item => item.Path, StringComparer.Ordinal) // a series' episodes together, so its Sonarr data is fetched once per run
             .Select(item => item.Id)
             .ToList();
-        _logger.LogInformation("Restoring original dates added: checking {Count} items", itemIds.Count);
+        _logger.LogInformation("Restoring original dates added: checking {Count} items ({NotRefreshed} skipped, not refreshed yet)", itemIds.Count, supported.Count - itemIds.Count);
 
         var updated = 0;
         var skipped = 0;
+        var removed = 0;
         for (var start = 0; start < itemIds.Count; start += ChunkSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -69,6 +73,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 .Select(id => _libraryManager.GetItemById(id)) // items change or disappear during a long run
                 .OfType<BaseItem>()
                 .ToList();
+            removed += chunkSize - chunk.Count;
             var resolution = await _resolver.ResolveAsync(chunk, cancellationToken).ConfigureAwait(false);
             skipped += resolution.Failures.Count;
             foreach (var item in chunk)
@@ -85,11 +90,11 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
         if (PluginSettings.DryRun)
         {
-            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source was unavailable", updated, itemIds.Count, skipped);
+            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source was unavailable, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
         }
         else
         {
-            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source was unavailable", updated, itemIds.Count, skipped);
+            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source was unavailable, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
         }
     }
 }

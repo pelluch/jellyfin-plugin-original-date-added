@@ -60,6 +60,12 @@ public class TracearrSource : IAddedDateSource
                 continue;
             }
 
+            if (!HasLookupIds(item))
+            {
+                _logger.Log(PluginSettings.DetailLevel, "Can't look up {Name} ({ItemId}) in Tracearr: it has no TMDB, IMDb or TVDB ID", item.Name, item.Id);
+                continue;
+            }
+
             string reference;
             IReadOnlyList<TracearrCopy>? copies;
             try
@@ -91,6 +97,10 @@ public class TracearrSource : IAddedDateSource
 
         return new SourceAnswers(candidates, failures);
     }
+
+    private static bool HasLookupIds(BaseItem item) =>
+        (item is Episode ? _episodeProviders : _movieProviders).Any(provider => item.TryGetProviderId(provider, out _))
+        || (item is Episode { Series: { } series } && _showProviders.Any(provider => series.TryGetProviderId(provider, out _)));
 
     private static string ReferenceName(MetadataProvider provider) => provider switch
     {
