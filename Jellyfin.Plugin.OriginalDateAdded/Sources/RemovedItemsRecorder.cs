@@ -103,7 +103,7 @@ public sealed class RemovedItemsRecorder : BackgroundService
             return;
         }
 
-        var decisions = await _resolver.ResolveAsync(successors, cancellationToken).ConfigureAwait(false);
+        var decisions = (await _resolver.ResolveAsync(successors, cancellationToken).ConfigureAwait(false)).Decisions;
         var reason = string.Create(CultureInfo.InvariantCulture, $"after {removal.Item.Name} ({removal.Item.Id}) was removed");
         foreach (var successor in successors)
         {

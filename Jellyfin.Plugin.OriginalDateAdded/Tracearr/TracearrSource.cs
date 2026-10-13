@@ -32,17 +32,21 @@ public class TracearrSource : IAddedDateSource
 
     public string Name => "tracearr";
 
-    public async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
+    public bool CanAnswerAuthoritatively => false;
+
+    public async Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var config = PluginSettings.Configuration;
-        var candidates = new Dictionary<Guid, AddedDateCandidate>();
         if (!config.TracearrEnabled
             || string.IsNullOrEmpty(config.TracearrUrl)
             || string.IsNullOrEmpty(config.TracearrApiKey)
             || string.IsNullOrEmpty(config.TracearrServerId))
         {
-            return candidates;
+            return SourceAnswers.None;
         }
+
+        var candidates = new Dictionary<Guid, AddedDateCandidate>();
+        var failures = new Dictionary<Guid, string>();
 
         var connection = new TracearrConnection(config.TracearrUrl, config.TracearrApiKey);
         var window = PluginSettings.ReplacementWindow;
@@ -63,6 +67,11 @@ public class TracearrSource : IAddedDateSource
             catch (TracearrException ex)
             {
                 _logger.LogWarning("Tracearr unavailable, skipping it for {Count} item(s): {Message}", items.Count - i, ex.Message);
+                foreach (var unanswered in items.Skip(i).Select(sourceItem => sourceItem.Item).Where(ItemIdentity.IsSupported))
+                {
+                    failures[unanswered.Id] = "Tracearr is unavailable";
+                }
+
                 break;
             }
 
@@ -79,7 +88,7 @@ public class TracearrSource : IAddedDateSource
             }
         }
 
-        return candidates;
+        return new SourceAnswers(candidates, failures);
     }
 
     private static string ReferenceName(MetadataProvider provider) => provider switch

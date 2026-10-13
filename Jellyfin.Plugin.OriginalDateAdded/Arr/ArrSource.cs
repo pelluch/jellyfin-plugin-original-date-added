@@ -26,15 +26,18 @@ public class ArrSource : IAddedDateSource
 
     public string Name => "arr";
 
-    public async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
+    public bool CanAnswerAuthoritatively => true;
+
+    public async Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var config = PluginSettings.Configuration;
-        var candidates = new Dictionary<Guid, AddedDateCandidate>();
         if (!config.ArrEnabled)
         {
-            return candidates;
+            return SourceAnswers.None;
         }
 
+        var candidates = new Dictionary<Guid, AddedDateCandidate>();
+        var failures = new Dictionary<Guid, string>();
         var remaining = items.Select(sourceItem => sourceItem.Item).Where(item => ItemIdentity.IsSupported(item) && !string.IsNullOrEmpty(item.Path)).ToList();
         foreach (var instance in config.ArrInstances.Where(instance => instance.Url.Length > 0 && instance.ApiKey.Length > 0))
         {
@@ -43,30 +46,48 @@ public class ArrSource : IAddedDateSource
                 break;
             }
 
+            string? app = null;
             try
             {
-                var status = await _cache.GetAsync("status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false);
-                var found = status.AppName switch
+                app = (await _cache.GetAsync("status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
+                switch (app)
                 {
-                    "Sonarr" => await FindEpisodesAsync(instance, status.AppName, remaining.OfType<Episode>().ToList(), cancellationToken).ConfigureAwait(false),
-                    "Radarr" => await FindMoviesAsync(instance, status.AppName, remaining.OfType<Movie>().ToList(), cancellationToken).ConfigureAwait(false),
-                    _ => [],
-                };
-                foreach (var (itemId, candidate) in found)
-                {
-                    candidates[itemId] = candidate;
+                    case "Sonarr":
+                        await FindEpisodesAsync(instance, app, remaining.OfType<Episode>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
+                        break;
+                    case "Radarr":
+                        await FindMoviesAsync(instance, app, remaining.OfType<Movie>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
+                        break;
                 }
-
-                remaining.RemoveAll(item => found.ContainsKey(item.Id));
             }
             catch (ArrException ex)
             {
-                _logger.LogWarning("{Url} unavailable, skipping it for {Count} item(s): {Message}", instance.Url, remaining.Count, ex.Message);
+                var unanswered = remaining.Where(item => !candidates.ContainsKey(item.Id) && MayManage(app, item)).ToList();
+                _logger.LogWarning("{Url} unavailable, skipping it for {Count} item(s): {Message}", instance.Url, unanswered.Count, ex.Message);
+                var reason = string.Create(CultureInfo.InvariantCulture, $"{app ?? "Sonarr/Radarr"} at {instance.Url} is unavailable");
+                foreach (var item in unanswered)
+                {
+                    failures.TryAdd(item.Id, reason);
+                }
             }
+
+            remaining.RemoveAll(item => candidates.ContainsKey(item.Id));
         }
 
-        return candidates;
+        foreach (var itemId in candidates.Keys)
+        {
+            failures.Remove(itemId); // answered by another instance
+        }
+
+        return new SourceAnswers(candidates, failures);
     }
+
+    private static bool MayManage(string? app, BaseItem item) => app switch
+    {
+        "Sonarr" => item is Episode,
+        "Radarr" => item is Movie,
+        _ => true,
+    };
 
     private static AddedDateCandidate ToCandidate(string app, BaseItem item, ArrLineageStart start)
     {
@@ -81,12 +102,11 @@ public class ArrSource : IAddedDateSource
         return new AddedDateCandidate(start.Date, null, detail, IsAuthoritative: start.IsImport);
     }
 
-    private async Task<Dictionary<Guid, AddedDateCandidate>> FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, CancellationToken cancellationToken)
+    private async Task FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
-        var found = new Dictionary<Guid, AddedDateCandidate>();
         if (movies.Count == 0)
         {
-            return found;
+            return;
         }
 
         var byPath = await _cache.GetAsync(
@@ -106,8 +126,6 @@ public class ArrSource : IAddedDateSource
                 found[movie.Id] = ToCandidate(app, movie, ArrLineage.FindStart(history, arrMovie.File, PluginSettings.ReplacementWindow));
             }
         }
-
-        return found;
     }
 
     private static Dictionary<string, (int MovieId, ArrFile File)> IndexByFilePath(IReadOnlyList<ArrMovie> movies)
@@ -124,12 +142,11 @@ public class ArrSource : IAddedDateSource
         return byPath;
     }
 
-    private async Task<Dictionary<Guid, AddedDateCandidate>> FindEpisodesAsync(ArrConnection instance, string app, List<Episode> episodes, CancellationToken cancellationToken)
+    private async Task FindEpisodesAsync(ArrConnection instance, string app, List<Episode> episodes, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
-        var found = new Dictionary<Guid, AddedDateCandidate>();
         if (episodes.Count == 0)
         {
-            return found;
+            return;
         }
 
         var allSeries = await _cache.GetAsync("series " + instance.Url, token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
@@ -161,7 +178,5 @@ public class ArrSource : IAddedDateSource
                 found[episode.Id] = ToCandidate(app, episode, start); // a file with several episodes takes the earliest
             }
         }
-
-        return found;
     }
 }

@@ -57,6 +57,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
         _logger.LogInformation("Restoring original dates added: checking {Count} items", itemIds.Count);
 
         var updated = 0;
+        var skipped = 0;
         for (var start = 0; start < itemIds.Count; start += ChunkSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -65,10 +66,11 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 .Select(id => _libraryManager.GetItemById(id)) // items change or disappear during a long run
                 .OfType<BaseItem>()
                 .ToList();
-            var decisions = await _resolver.ResolveAsync(chunk, cancellationToken).ConfigureAwait(false);
+            var resolution = await _resolver.ResolveAsync(chunk, cancellationToken).ConfigureAwait(false);
+            skipped += resolution.Failures.Count;
             foreach (var item in chunk)
             {
-                if (decisions.TryGetValue(item.Id, out var decision)
+                if (resolution.Decisions.TryGetValue(item.Id, out var decision)
                     && await _applier.ApplyAsync(item, decision, "by the Restore original dates added task", cancellationToken).ConfigureAwait(false))
                 {
                     updated++;
@@ -80,11 +82,11 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
         if (PluginSettings.DryRun)
         {
-            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed", updated, itemIds.Count);
+            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source was unavailable", updated, itemIds.Count, skipped);
         }
         else
         {
-            _logger.LogInformation("{Updated} of {Count} items had their date added changed", updated, itemIds.Count);
+            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source was unavailable", updated, itemIds.Count, skipped);
         }
     }
 }

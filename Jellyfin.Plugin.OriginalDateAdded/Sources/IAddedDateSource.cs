@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,5 +8,9 @@ public interface IAddedDateSource
 {
     string Name { get; }
 
-    Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken);
+    bool CanAnswerAuthoritatively { get; }
+
+    // A failure stops querying other sources
+    // for this item
+    Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken);
 }

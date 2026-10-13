@@ -26,7 +26,7 @@ public class AddedDateResolver
         _logger = logger;
     }
 
-    public async Task<IReadOnlyDictionary<Guid, AddedDateDecision>> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
+    public async Task<AddedDateResolution> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
         var serverSetUpAt = _serverSetup.Date;
         var sourceItems = items
@@ -34,14 +34,25 @@ public class AddedDateResolver
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
             .ToList();
         var decisions = new Dictionary<Guid, AddedDateDecision>();
+        var failures = new Dictionary<Guid, string>();
         var others = new List<(string Source, Guid ItemId, AddedDateCandidate Candidate)>();
         foreach (var source in _sources)
         {
-            var pending = sourceItems.Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)).ToList();
-            var candidates = await GetCandidatesAsync(source, pending, cancellationToken).ConfigureAwait(false);
+            var pending = sourceItems
+                .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
+                    && !failures.ContainsKey(sourceItem.Item.Id)
+                    && (source.CanAnswerAuthoritatively || !HasAuthoritativeDecision(sourceItem.Item.Id)))
+                .ToList();
+            var answers = await GetAnswersAsync(source, pending, cancellationToken).ConfigureAwait(false);
             foreach (var (item, scannedAt) in pending)
             {
-                if (!candidates.TryGetValue(item.Id, out var candidate))
+                if (answers.Failures.TryGetValue(item.Id, out var reason))
+                {
+                    failures[item.Id] = reason;
+                    continue;
+                }
+
+                if (!answers.Candidates.TryGetValue(item.Id, out var candidate))
                 {
                     continue;
                 }
@@ -60,7 +71,8 @@ public class AddedDateResolver
 
         var undecided = sourceItems
             .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
-                && _store.GetItem(sourceItem.Item.Id) is not { Authoritative: true }) // An authoritative source, if any, didn't answer
+                && !failures.ContainsKey(sourceItem.Item.Id)
+                && !HasAuthoritativeDecision(sourceItem.Item.Id)) // An authoritative source, if any, didn't answer
             .ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
         foreach (var (sourceName, itemId, candidate) in others)
         {
@@ -72,7 +84,15 @@ public class AddedDateResolver
             }
         }
 
-        return decisions;
+        foreach (var (item, _) in sourceItems)
+        {
+            if (failures.TryGetValue(item.Id, out var reason))
+            {
+                _logger.Log(PluginSettings.DetailLevel, "No date added decision for {Name} ({ItemId}): {Reason}", item.Name, item.Id, reason);
+            }
+        }
+
+        return new AddedDateResolution(decisions, failures);
     }
 
     private static (DateTime AddedAt, string Detail) ClampToServerSetUp(AddedDateCandidate candidate, DateTime? serverSetUpAt)
@@ -134,11 +154,13 @@ public class AddedDateResolver
         return true;
     }
 
-    private async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IAddedDateSource source, List<SourceItem> items, CancellationToken cancellationToken)
+    private bool HasAuthoritativeDecision(Guid itemId) => _store.GetItem(itemId) is { Authoritative: true };
+
+    private async Task<SourceAnswers> GetAnswersAsync(IAddedDateSource source, List<SourceItem> items, CancellationToken cancellationToken)
     {
         if (items.Count == 0)
         {
-            return new Dictionary<Guid, AddedDateCandidate>();
+            return SourceAnswers.None;
         }
 
         try
@@ -148,7 +170,8 @@ public class AddedDateResolver
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Source {Source} failed", source.Name);
-            return new Dictionary<Guid, AddedDateCandidate>();
+            var reason = string.Create(CultureInfo.InvariantCulture, $"source {source.Name} failed");
+            return new SourceAnswers(new Dictionary<Guid, AddedDateCandidate>(), items.ToDictionary(sourceItem => sourceItem.Item.Id, _ => reason));
         }
     }
 }

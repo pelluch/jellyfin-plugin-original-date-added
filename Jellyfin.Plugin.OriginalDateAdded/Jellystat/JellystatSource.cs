@@ -36,14 +36,18 @@ public class JellystatSource : IAddedDateSource
 
     public string Name => "jellystat";
 
-    public async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
+    public bool CanAnswerAuthoritatively => false;
+
+    public async Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var config = PluginSettings.Configuration;
-        var candidates = new Dictionary<Guid, AddedDateCandidate>();
         if (!config.JellystatEnabled || string.IsNullOrEmpty(config.JellystatUrl) || string.IsNullOrEmpty(config.JellystatApiKey))
         {
-            return candidates;
+            return SourceAnswers.None;
         }
+
+        var candidates = new Dictionary<Guid, AddedDateCandidate>();
+        var failures = new Dictionary<Guid, string>();
 
         var connection = new JellystatConnection(config.JellystatUrl, config.JellystatApiKey);
         var done = 0;
@@ -53,7 +57,7 @@ public class JellystatSource : IAddedDateSource
             if (!libraries.Any(library => library.BelongsTo(_applicationHost.SystemId)))
             {
                 _logger.LogWarning("Jellystat tracks a different Jellyfin server, skipping it for {Count} item(s)", items.Count);
-                return candidates;
+                return SourceAnswers.None;
             }
 
             foreach (var (item, scannedAt) in items)
@@ -70,9 +74,13 @@ public class JellystatSource : IAddedDateSource
         catch (JellystatException ex)
         {
             _logger.LogWarning("Jellystat unavailable, skipping it for {Count} item(s): {Message}", items.Count - done, ex.Message);
+            foreach (var unanswered in items.Skip(done).Select(sourceItem => sourceItem.Item).Where(ItemIdentity.IsSupported))
+            {
+                failures[unanswered.Id] = "Jellystat is unavailable";
+            }
         }
 
-        return candidates;
+        return new SourceAnswers(candidates, failures);
     }
 
     private async Task<AddedDateCandidate?> FindCandidateAsync(
