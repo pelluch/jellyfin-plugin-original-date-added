@@ -80,7 +80,8 @@
                             </button>
                             <div id="TracearrTestResult" class="fieldDescription"></div>
                         </div>
-                        <div class="selectContainer">
+                        <div id="TracearrServerInfo" class="fieldDescription" style="margin-top:1em;"></div>
+                        <div id="TracearrServerSelect" class="selectContainer" hidden>
                             <label class="selectLabel" for="TracearrServerId">Tracearr server</label>
                             <select is="emby-select" id="TracearrServerId" name="TracearrServerId" class="emby-select-withcolor emby-select"></select>
                             <div class="fieldDescription">Which Tracearr Jellyfin backend corresponds to this server.</div>
@@ -112,6 +113,7 @@
                         </div>
                     </div>
                     <div>
+                        <div id="SaveError" class="fieldDescription"></div>
                         <button is="emby-button" type="submit" class="raised button-submit block emby-button">
                             <span>Save</span>
                         </button>
@@ -189,13 +191,39 @@
                     .filter(function (instance) { return instance.Url || instance.ApiKey; });
             }
 
+            var tracearrSaved = { Id: '', Name: '' };
+
+            // servers is null until Tracearr has answered a Test
             function setTracearrServers(servers, selectedId) {
                 var select = document.querySelector('#TracearrServerId');
+                var selectContainer = document.querySelector('#TracearrServerSelect');
+                var info = document.querySelector('#TracearrServerInfo');
                 select.innerHTML = '';
-                if (servers.length !== 1) {
-                    select.appendChild(new Option('', ''));
+                selectContainer.hidden = true;
+                if (servers === null) {
+                    if (tracearrSaved.Id) {
+                        select.appendChild(new Option(tracearrSaved.Name, tracearrSaved.Id));
+                    }
+
+                    info.textContent = tracearrSaved.Id ? 'Tracearr server: ' + tracearrSaved.Name : '';
+                    return;
                 }
 
+                var lost = tracearrSaved.Id && !servers.some(function (server) { return server.Id === tracearrSaved.Id; })
+                    ? 'The saved Tracearr server "' + tracearrSaved.Name + '" is no longer in Tracearr. '
+                    : '';
+                if (servers.length === 0) {
+                    info.textContent = lost;
+                    return;
+                }
+
+                if (servers.length === 1) {
+                    select.appendChild(new Option(servers[0].Name, servers[0].Id));
+                    info.textContent = lost + 'Using Tracearr server: ' + servers[0].Name;
+                    return;
+                }
+
+                select.appendChild(new Option('', ''));
                 servers.forEach(function (server) {
                     select.appendChild(new Option(server.Name, server.Id));
                 });
@@ -203,6 +231,31 @@
                 if (servers.some(function (server) { return server.Id === selectedId; })) {
                     select.value = selectedId;
                 }
+
+                selectContainer.hidden = false;
+                info.textContent = lost ? lost + 'Pick the server that is this Jellyfin.' : '';
+            }
+
+            function testTracearr() {
+                var result = document.querySelector('#TracearrTestResult');
+                result.textContent = 'Testing…';
+                ApiClient.ajax({
+                    type: 'POST',
+                    url: ApiClient.getUrl('OriginalDateAdded/Tracearr/Test'),
+                    data: JSON.stringify({
+                        Url: document.querySelector('#TracearrUrl').value.trim(),
+                        ApiKey: document.querySelector('#TracearrApiKey').value.trim()
+                    }),
+                    contentType: 'application/json',
+                    dataType: 'json'
+                }).then(function (response) {
+                    result.textContent = response.Message;
+                    if (response.Servers) {
+                        setTracearrServers(response.Servers, document.querySelector('#TracearrServerId').value);
+                    }
+                }, function () {
+                    result.textContent = 'The test request failed.';
+                });
             }
 
             document.querySelector('#ArrAdd')
@@ -236,27 +289,7 @@
                 });
 
             document.querySelector('#TracearrTest')
-                .addEventListener('click', function () {
-                    var result = document.querySelector('#TracearrTestResult');
-                    result.textContent = 'Testing…';
-                    ApiClient.ajax({
-                        type: 'POST',
-                        url: ApiClient.getUrl('OriginalDateAdded/Tracearr/Test'),
-                        data: JSON.stringify({
-                            Url: document.querySelector('#TracearrUrl').value.trim(),
-                            ApiKey: document.querySelector('#TracearrApiKey').value.trim()
-                        }),
-                        contentType: 'application/json',
-                        dataType: 'json'
-                    }).then(function (response) {
-                        result.textContent = response.Message;
-                        if (response.Success) {
-                            setTracearrServers(response.Servers, document.querySelector('#TracearrServerId').value);
-                        }
-                    }, function () {
-                        result.textContent = 'The test request failed.';
-                    });
-                });
+                .addEventListener('click', testTracearr);
 
             document.querySelector('#JellystatTest')
                 .addEventListener('click', function () {
@@ -299,15 +332,28 @@
                         document.querySelector('#JellystatEnabled').checked = config.JellystatEnabled;
                         document.querySelector('#JellystatUrl').value = config.JellystatUrl;
                         document.querySelector('#JellystatApiKey').value = config.JellystatApiKey;
-                        setTracearrServers(
-                            config.TracearrServerId ? [{ Id: config.TracearrServerId, Name: config.TracearrServerName }] : [],
-                            config.TracearrServerId);
+                        tracearrSaved = { Id: config.TracearrServerId, Name: config.TracearrServerName };
+                        document.querySelector('#TracearrTestResult').textContent = '';
+                        document.querySelector('#SaveError').textContent = '';
+                        setTracearrServers(null, config.TracearrServerId);
+                        if (config.TracearrUrl && config.TracearrApiKey) {
+                            testTracearr();
+                        }
+
                         Dashboard.hideLoadingMsg();
                     });
                 });
 
             document.querySelector('#OriginalDateAddedConfigForm')
                 .addEventListener('submit', function(e) {
+                e.preventDefault();
+                var saveError = document.querySelector('#SaveError');
+                if (document.querySelector('#TracearrEnabled').checked && !document.querySelector('#TracearrServerId').value) {
+                    saveError.textContent = 'Not saved: Tracearr is enabled but no Tracearr server is selected. Press Test in the Tracearr section and pick the server that is this Jellyfin, or untick "Use Tracearr".';
+                    return false;
+                }
+
+                saveError.textContent = '';
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                     config.ReplacementWindowDays = parseInt(document.querySelector('#ReplacementWindowDays').value, 10);
@@ -327,11 +373,11 @@
                     config.TracearrServerId = server.value;
                     config.TracearrServerName = server.selectedIndex >= 0 ? server.options[server.selectedIndex].text : '';
                     ApiClient.updatePluginConfiguration(OriginalDateAddedConfig.pluginUniqueId, config).then(function (result) {
+                        tracearrSaved = { Id: config.TracearrServerId, Name: config.TracearrServerName };
                         Dashboard.processPluginConfigurationUpdateResult(result);
                     });
                 });
 
-                e.preventDefault();
                 return false;
             });
         </script>

@@ -25,14 +25,16 @@ public class TracearrController : ControllerBase
         try
         {
             var servers = await _client.GetJellyfinServersAsync(connection, cancellationToken).ConfigureAwait(false);
-            var message = servers.Count == 0
-                ? "Connected, but Tracearr has no Jellyfin servers"
-                : string.Create(CultureInfo.InvariantCulture, $"Connected. Tracearr has {servers.Count} Jellyfin server(s).");
-            return new TracearrTestResult(true, message, servers);
+            if (servers.Count == 0)
+            {
+                return new TracearrTestResult(false, "Connected, but Tracearr has no Jellyfin servers. Add this Jellyfin to Tracearr first.", servers);
+            }
+
+            return new TracearrTestResult(true, string.Create(CultureInfo.InvariantCulture, $"Connected. Tracearr has {servers.Count} Jellyfin server(s)."), servers);
         }
         catch (TracearrException ex)
         {
-            return new TracearrTestResult(false, ex.Message, []);
+            return new TracearrTestResult(false, ex.Message, null);
         }
     }
 }
