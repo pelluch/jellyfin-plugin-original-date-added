@@ -97,7 +97,7 @@ public class TracearrSource : IAddedDateSource
         var links = 0;
         var appearedAt = scannedAt;
         while (copies
-            .Where(copy => copy.AddedAt <= appearedAt - AddedDateResolver.MinimumDifference && (copy.RemovedAt is not { } removedAt || appearedAt - removedAt <= window))
+            .Where(copy => copy.AddedAt <= appearedAt - PluginSettings.MinimumDifference && (copy.RemovedAt is not { } removedAt || appearedAt - removedAt <= window))
             .MinBy(copy => copy.AddedAt) is { } link)
         {
             first ??= link;
@@ -108,7 +108,7 @@ public class TracearrSource : IAddedDateSource
 
         foreach (var copy in copies)
         {
-            if (copy.AddedAt <= appearedAt - AddedDateResolver.MinimumDifference && copy.RemovedAt is { } removedAt)
+            if (copy.AddedAt <= appearedAt - PluginSettings.MinimumDifference && copy.RemovedAt is { } removedAt)
             {
                 _logger.Log(
                     PluginSettings.DetailLevel,

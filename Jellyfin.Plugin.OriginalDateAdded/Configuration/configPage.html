@@ -16,12 +16,17 @@
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="ReplacementWindowDays">Replacement window (days)</label>
                         <input id="ReplacementWindowDays" name="ReplacementWindowDays" type="number" is="emby-input" min="0" required />
-                        <div class="fieldDescription">Maximum number of days that can pass between an item being removed and its replacement being scanned in before it is no longer eligible for an added date update. Beyond this, the item's replacement will get added to "Recently Added" as per the logic without this plugin.</div>
+                        <div class="fieldDescription">Maximum number of days that can pass between an item being removed and its replacement being scanned in before it is no longer eligible for an added date update. Beyond this, the item's replacement will get added to "Recently Added" as per the logic without this plugin. Set to 0 for no limit.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="MinimumDifferenceMinutes">Minimum difference (minutes)</label>
+                        <input id="MinimumDifferenceMinutes" name="MinimumDifferenceMinutes" type="number" is="emby-input" min="0" required />
+                        <div class="fieldDescription">Dates added that differ by less than this are left as they are: rounding between sources, and Jellyfin scanning a file a few minutes after Sonarr or Radarr imported it.</div>
                     </div>
                     <div class="inputContainer">
                         <label class="inputLabel inputLabelUnfocused" for="ItemsToCheck">Items to check</label>
                         <input id="ItemsToCheck" name="ItemsToCheck" type="number" is="emby-input" min="0" required />
-                        <div class="fieldDescription">How many of the most recently added movies and episodes the "Backdate replacements" task checks. Set to 0 to check all of them.</div>
+                        <div class="fieldDescription">How many of the most recently added movies and episodes the "Restore original dates added" task checks. Set to 0 to check all of them.</div>
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
@@ -281,6 +286,7 @@
                     Dashboard.showLoadingMsg();
                     ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                         document.querySelector('#ReplacementWindowDays').value = config.ReplacementWindowDays;
+                        document.querySelector('#MinimumDifferenceMinutes').value = config.MinimumDifferenceMinutes;
                         document.querySelector('#ItemsToCheck').value = config.ItemsToCheck;
                         document.querySelector('#DryRun').checked = config.DryRun;
                         document.querySelector('#VerboseLogging').checked = config.VerboseLogging;
@@ -305,6 +311,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(OriginalDateAddedConfig.pluginUniqueId).then(function (config) {
                     config.ReplacementWindowDays = parseInt(document.querySelector('#ReplacementWindowDays').value, 10);
+                    config.MinimumDifferenceMinutes = parseInt(document.querySelector('#MinimumDifferenceMinutes').value, 10);
                     config.ItemsToCheck = parseInt(document.querySelector('#ItemsToCheck').value, 10);
                     config.DryRun = document.querySelector('#DryRun').checked;
                     config.VerboseLogging = document.querySelector('#VerboseLogging').checked;

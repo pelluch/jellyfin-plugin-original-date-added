@@ -82,12 +82,12 @@ public class AddedDateApplier
     {
         var addedAt = decision.Entry.AddedAt;
         var stored = _store.GetItem(item.Id);
-        if (decision.IsAuthoritative)
+        if (decision.Entry.Authoritative)
         {
-            return (addedAt - item.DateCreated).Duration() >= AddedDateResolver.MinimumDifference && stored?.AddedAt != addedAt;
+            return (addedAt - item.DateCreated).Duration() >= PluginSettings.MinimumDifference && stored?.AddedAt != addedAt;
         }
 
-        var isEarlier = addedAt <= item.DateCreated - AddedDateResolver.MinimumDifference;
+        var isEarlier = addedAt <= item.DateCreated - PluginSettings.MinimumDifference;
         var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date;
         return (isEarlier || isBeforeServerSetUp) && !(stored is not null && stored.AddedAt <= addedAt);
     }

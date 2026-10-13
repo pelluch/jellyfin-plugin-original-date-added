@@ -1,4 +1,3 @@
-using System;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -37,7 +36,7 @@ public class ArrTester
 
             var libraryFolders = _libraryManager.GetVirtualFolders().SelectMany(library => library.Locations).ToList();
             var unmatched = rootFolders
-                .Where(root => !libraryFolders.Any(folder => IsWithin(root, folder) || IsWithin(folder, root)))
+                .Where(root => !libraryFolders.Any(folder => ArrPaths.IsWithin(root, folder) || ArrPaths.IsWithin(folder, root)))
                 .ToList();
             if (unmatched.Count == rootFolders.Count)
             {
@@ -59,14 +58,5 @@ public class ArrTester
         {
             return new ArrTestResult(false, ex.Message);
         }
-    }
-
-    private static bool IsWithin(string path, string folder)
-    {
-        path = path.TrimEnd('/', '\\');
-        folder = folder.TrimEnd('/', '\\');
-        return path == folder
-            || path.StartsWith(folder + "/", StringComparison.Ordinal)
-            || path.StartsWith(folder + "\\", StringComparison.Ordinal);
     }
 }

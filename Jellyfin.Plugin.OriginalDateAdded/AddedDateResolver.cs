@@ -13,8 +13,6 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 
 public class AddedDateResolver
 {
-    public static readonly TimeSpan MinimumDifference = TimeSpan.FromMinutes(1); // absorbs rounding between sources, e.g. Tracearr's milliseconds
-
     private readonly IEnumerable<IAddedDateSource> _sources;
     private readonly AddedDateStore _store;
     private readonly ServerSetup _serverSetup;
@@ -36,14 +34,44 @@ public class AddedDateResolver
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
             .ToList();
         var decisions = new Dictionary<Guid, AddedDateDecision>();
-        await AddAuthoritativeDecisionsAsync(sourceItems, serverSetUpAt, decisions, cancellationToken).ConfigureAwait(false);
+        var others = new List<(string Source, Guid ItemId, AddedDateCandidate Candidate)>();
+        foreach (var source in _sources)
+        {
+            var pending = sourceItems.Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)).ToList();
+            var candidates = await GetCandidatesAsync(source, pending, cancellationToken).ConfigureAwait(false);
+            foreach (var (item, scannedAt) in pending)
+            {
+                if (!candidates.TryGetValue(item.Id, out var candidate))
+                {
+                    continue;
+                }
 
-        var authoritativeSources = _sources.Where(source => source.IsAuthoritative).Select(source => source.Name).ToHashSet(StringComparer.Ordinal);
+                if (candidate.IsAuthoritative)
+                {
+                    var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
+                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt, Authoritative: true), detail);
+                }
+                else
+                {
+                    others.Add((source.Name, item.Id, candidate));
+                }
+            }
+        }
+
         var undecided = sourceItems
             .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
-                && !(_store.GetItem(sourceItem.Item.Id) is { } stored && authoritativeSources.Contains(stored.Source))) // its authoritative source didn't answer this time, e.g. it's down
-            .ToList();
-        await AddEarliestDecisionsAsync(undecided, serverSetUpAt, decisions, cancellationToken).ConfigureAwait(false);
+                && _store.GetItem(sourceItem.Item.Id) is not { Authoritative: true }) // An authoritative source, if any, didn't answer
+            .ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
+        foreach (var (sourceName, itemId, candidate) in others)
+        {
+            if (undecided.TryGetValue(itemId, out var scannedAt)
+                && DecideOrdinary(itemId, candidate, sourceName, scannedAt, serverSetUpAt) is { } decision
+                && (!decisions.TryGetValue(itemId, out var current) || decision.Entry.AddedAt < current.Entry.AddedAt))
+            {
+                decisions[itemId] = decision;
+            }
+        }
+
         return decisions;
     }
 
@@ -52,78 +80,38 @@ public class AddedDateResolver
             ? (setUpAt, string.Create(CultureInfo.InvariantCulture, $"{candidate.Detail}, {candidate.AddedAt:u} is before this server was set up"))
             : (candidate.AddedAt, candidate.Detail);
 
-    private async Task AddAuthoritativeDecisionsAsync(
-        List<SourceItem> sourceItems,
-        DateTime? serverSetUpAt,
-        Dictionary<Guid, AddedDateDecision> decisions,
-        CancellationToken cancellationToken)
+    private AddedDateDecision? DecideOrdinary(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt, DateTime? serverSetUpAt)
     {
-        foreach (var source in _sources.Where(source => source.IsAuthoritative))
+        var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
+        if (serverSetUpAt is { } setUpAt && scannedAt < setUpAt)
         {
-            var pending = sourceItems.Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)).ToList();
-            var candidates = await GetCandidatesAsync(source, pending, cancellationToken).ConfigureAwait(false);
-            foreach (var (item, scannedAt) in pending)
+            // The item's own date can't be right, so any record of its content gives it the setup date.
+            if (addedAt > setUpAt)
             {
-                if (candidates.TryGetValue(item.Id, out var candidate))
-                {
-                    var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
-                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail, IsAuthoritative: true);
-                }
+                detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, this item's date {scannedAt:u} is before this server was set up");
+                addedAt = setUpAt;
             }
         }
-    }
-
-    private async Task AddEarliestDecisionsAsync(
-        List<SourceItem> sourceItems,
-        DateTime? serverSetUpAt,
-        Dictionary<Guid, AddedDateDecision> decisions,
-        CancellationToken cancellationToken)
-    {
-        var scannedDates = sourceItems.ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
-        foreach (var source in _sources.Where(source => !source.IsAuthoritative))
+        else if (!IsAcceptable(itemId, candidate, sourceName, scannedAt))
         {
-            var candidates = await GetCandidatesAsync(source, sourceItems, cancellationToken).ConfigureAwait(false);
-            foreach (var (itemId, candidate) in candidates)
-            {
-                if (!scannedDates.TryGetValue(itemId, out var scannedAt))
-                {
-                    continue;
-                }
-
-                var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
-                if (serverSetUpAt is { } setUpAt && scannedAt < setUpAt)
-                {
-                    // The item's own date can't be right, so any record of its content gives it the setup date.
-                    if (addedAt > setUpAt)
-                    {
-                        detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, this item's date {scannedAt:u} is before this server was set up");
-                        addedAt = setUpAt;
-                    }
-                }
-                else if (!IsAcceptable(itemId, candidate, source.Name, scannedAt))
-                {
-                    continue;
-                }
-
-                if (!decisions.TryGetValue(itemId, out var current) || addedAt < current.Entry.AddedAt)
-                {
-                    decisions[itemId] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt), detail);
-                }
-            }
+            return null;
         }
+
+        return new AddedDateDecision(new ItemEntry(addedAt, sourceName, scannedAt), detail);
     }
 
     private bool IsAcceptable(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt)
     {
-        if (candidate.AddedAt > scannedAt - MinimumDifference)
+        if (candidate.AddedAt > scannedAt - PluginSettings.MinimumDifference)
         {
             _logger.Log(
                 PluginSettings.DetailLevel,
-                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), not at least a minute earlier than {ScannedAt}",
+                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), not at least {Minutes} minutes earlier than {ScannedAt}",
                 itemId,
                 candidate.AddedAt,
                 sourceName,
                 candidate.Detail,
+                PluginSettings.MinimumDifference.TotalMinutes,
                 scannedAt);
             return false;
         }

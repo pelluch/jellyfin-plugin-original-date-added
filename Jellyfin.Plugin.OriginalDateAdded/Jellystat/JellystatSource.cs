@@ -124,7 +124,7 @@ public class JellystatSource : IAddedDateSource
             var live = _libraryManager.GetItemById(id);
             if (live is null)
             {
-                if (addedAt is { } date && date <= scannedAt - AddedDateResolver.MinimumDifference)
+                if (addedAt is { } date && date <= scannedAt - PluginSettings.MinimumDifference)
                 {
                     earlier.Add(date);
                 }

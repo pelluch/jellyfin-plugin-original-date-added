@@ -38,7 +38,7 @@ public sealed class RemovedItemsRecorder : BackgroundService
 
     public override Task StartAsync(CancellationToken cancellationToken)
     {
-        _store.PruneRemoved(DateTime.UtcNow - PluginSettings.ReplacementWindow);
+        _store.PruneRemoved(WindowStart(DateTime.UtcNow));
         _libraryManager.ItemRemoved += OnItemRemoved;
         return base.StartAsync(cancellationToken);
     }
@@ -64,6 +64,12 @@ public sealed class RemovedItemsRecorder : BackgroundService
         }
     }
 
+    private static DateTime WindowStart(DateTime end)
+    {
+        var window = PluginSettings.ReplacementWindow;
+        return window == TimeSpan.MaxValue ? DateTime.MinValue : end - window;
+    }
+
     private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
     {
         var item = e.Item;
@@ -80,7 +86,7 @@ public sealed class RemovedItemsRecorder : BackgroundService
         }
 
         var removedAt = DateTime.UtcNow;
-        _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, removedAt, item.GetBaseItemKind()), expiredBefore: removedAt - PluginSettings.ReplacementWindow);
+        _store.AddRemoved(keys, new RemovedEntry(item.DateCreated, removedAt, item.GetBaseItemKind()), expiredBefore: WindowStart(removedAt));
         if (ItemIdentity.SameContentQuery(item) is { } query)
         {
             _removals.Writer.TryWrite(new Removal(item, keys, query));
