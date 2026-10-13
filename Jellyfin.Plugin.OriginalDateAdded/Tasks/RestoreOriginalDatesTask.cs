@@ -42,7 +42,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var itemsToCheck = PluginSettings.Configuration.ItemsToCheck;
-        var items = _libraryManager.GetItemList(new InternalItemsQuery
+        var itemIds = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = [BaseItemKind.Movie, BaseItemKind.Episode],
                 IsVirtualItem = false,
@@ -52,14 +52,19 @@ public class RestoreOriginalDatesTask : IScheduledTask
             })
             .Where(item => ItemIdentity.IsSupported(item) && ItemIdentity.HasBeenRefreshed(item))
             .OrderBy(item => item.Path, StringComparer.Ordinal) // a series' episodes together, so its Sonarr data is fetched once per run
+            .Select(item => item.Id)
             .ToList();
-        _logger.LogInformation("Restoring original dates added: checking {Count} items", items.Count);
+        _logger.LogInformation("Restoring original dates added: checking {Count} items", itemIds.Count);
 
         var updated = 0;
-        for (var start = 0; start < items.Count; start += ChunkSize)
+        for (var start = 0; start < itemIds.Count; start += ChunkSize)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var chunk = items.GetRange(start, Math.Min(ChunkSize, items.Count - start));
+            var chunkSize = Math.Min(ChunkSize, itemIds.Count - start);
+            var chunk = itemIds.GetRange(start, chunkSize)
+                .Select(id => _libraryManager.GetItemById(id)) // items change or disappear during a long run
+                .OfType<BaseItem>()
+                .ToList();
             var decisions = await _resolver.ResolveAsync(chunk, cancellationToken).ConfigureAwait(false);
             foreach (var item in chunk)
             {
@@ -70,16 +75,16 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 }
             }
 
-            progress.Report(100.0 * (start + chunk.Count) / items.Count);
+            progress.Report(100.0 * (start + chunkSize) / itemIds.Count);
         }
 
         if (PluginSettings.DryRun)
         {
-            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed", updated, items.Count);
+            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed", updated, itemIds.Count);
         }
         else
         {
-            _logger.LogInformation("{Updated} of {Count} items had their date added changed", updated, items.Count);
+            _logger.LogInformation("{Updated} of {Count} items had their date added changed", updated, itemIds.Count);
         }
     }
 }

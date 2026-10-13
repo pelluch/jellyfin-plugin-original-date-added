@@ -9,12 +9,14 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 
 public class AddedDateApplier
 {
+    private readonly ILibraryManager _libraryManager;
     private readonly AddedDateStore _store;
     private readonly ServerSetup _serverSetup;
     private readonly ILogger<AddedDateApplier> _logger;
 
-    public AddedDateApplier(AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateApplier> logger)
+    public AddedDateApplier(ILibraryManager libraryManager, AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateApplier> logger)
     {
+        _libraryManager = libraryManager;
         _store = store;
         _serverSetup = serverSetup;
         _logger = logger;
@@ -22,16 +24,23 @@ public class AddedDateApplier
 
     public async Task<bool> ApplyAsync(BaseItem item, AddedDateDecision decision, string reason, CancellationToken cancellationToken)
     {
+        // Saving a removed item re-inserts it, and saving a stale copy undoes changes made since it was read
+        if (_libraryManager.GetItemById(item.Id) is not { } current)
+        {
+            _logger.Log(PluginSettings.DetailLevel, "Leaving date added of {Name} ({ItemId}) as it is, the item is no longer in the library", item.Name, item.Id);
+            return false;
+        }
+
         var dryRun = PluginSettings.DryRun;
-        if (!Record(item, decision, reason, dryRun))
+        if (!Record(current, decision, reason, dryRun))
         {
             return false;
         }
 
         if (!dryRun)
         {
-            item.DateCreated = decision.Entry.AddedAt;
-            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
+            current.DateCreated = decision.Entry.AddedAt;
+            await current.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
         }
 
         return true;
