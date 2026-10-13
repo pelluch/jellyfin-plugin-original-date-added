@@ -37,7 +37,10 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
     public string Category => "Original Date Added";
 
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => [];
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() =>
+    [
+        new TaskTriggerInfo { Type = TaskTriggerInfoType.DailyTrigger, TimeOfDayTicks = TimeSpan.FromHours(4).Ticks },
+    ];
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {

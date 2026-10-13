@@ -121,7 +121,10 @@ public class TracearrClient
                         HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Tracearr rejected the API key",
                         HttpStatusCode.TooManyRequests =>"Tracearr's rate limit was still exceeded after retrying",
                         _ => string.Create(CultureInfo.InvariantCulture, $"Tracearr returned HTTP {(int)response.StatusCode}"),
-                    });
+                    })
+                    {
+                        IsTransient = (int)response.StatusCode >= 500,
+                    };
                 }
 
                 return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, timeout.Token).ConfigureAwait(false)
@@ -129,11 +132,11 @@ public class TracearrClient
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                throw new TracearrException(string.Create(CultureInfo.InvariantCulture, $"Tracearr did not respond within {_timeout.TotalSeconds} seconds"));
+                throw new TracearrException(string.Create(CultureInfo.InvariantCulture, $"Tracearr did not respond within {_timeout.TotalSeconds} seconds")) { IsTransient = true };
             }
             catch (HttpRequestException ex)
             {
-                throw new TracearrException("Could not reach Tracearr: " + ex.Message, ex);
+                throw new TracearrException("Could not reach Tracearr: " + ex.Message, ex) { IsTransient = true };
             }
             catch (JsonException ex)
             {

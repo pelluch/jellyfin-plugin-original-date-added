@@ -17,6 +17,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ServerSetup>();
         serviceCollection.AddSingleton<AddedDateResolver>();
         serviceCollection.AddSingleton<AddedDateApplier>();
+        serviceCollection.AddSingleton<SourceAvailability>();
         // Order matters here. Sources defined first run first.
         serviceCollection.AddSingleton<IAddedDateSource, ArrSource>();
         serviceCollection.AddSingleton<IAddedDateSource, RemovedItemsSource>();

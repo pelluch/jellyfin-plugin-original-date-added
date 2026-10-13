@@ -114,7 +114,10 @@ public class ArrClient
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "The API key was rejected",
                     HttpStatusCode.NotFound => "There is no Sonarr or Radarr API at this URL",
                     _ => string.Create(CultureInfo.InvariantCulture, $"The server returned HTTP {(int)response.StatusCode}"),
-                });
+                })
+                {
+                    IsTransient = (int)response.StatusCode >= 500 || response.StatusCode == HttpStatusCode.TooManyRequests,
+                };
             }
 
             return await response.Content.ReadFromJsonAsync<T>(_jsonOptions, timeout.Token).ConfigureAwait(false)
@@ -122,11 +125,11 @@ public class ArrClient
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new ArrException(string.Create(CultureInfo.InvariantCulture, $"No response within {_timeout.TotalSeconds} seconds"));
+            throw new ArrException(string.Create(CultureInfo.InvariantCulture, $"No response within {_timeout.TotalSeconds} seconds")) { IsTransient = true };
         }
         catch (HttpRequestException ex)
         {
-            throw new ArrException("Could not connect: " + ex.Message, ex);
+            throw new ArrException("Could not connect: " + ex.Message, ex) { IsTransient = true };
         }
         catch (JsonException ex)
         {

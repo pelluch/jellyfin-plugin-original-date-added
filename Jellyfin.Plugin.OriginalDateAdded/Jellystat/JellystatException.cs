@@ -1,8 +1,9 @@
 using System;
+using Jellyfin.Plugin.OriginalDateAdded.Sources;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Jellystat;
 
-public class JellystatException : Exception
+public class JellystatException : SourceException
 {
     public JellystatException()
     {

@@ -1,8 +1,9 @@
 using System;
+using Jellyfin.Plugin.OriginalDateAdded.Sources;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Tracearr;
 
-public class TracearrException : Exception
+public class TracearrException : SourceException
 {
     public TracearrException()
     {

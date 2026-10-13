@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -8,20 +9,20 @@ using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
-using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Arr;
 
 public class ArrSource : IAddedDateSource
 {
     private readonly ArrClient _client;
-    private readonly ILogger<ArrSource> _logger;
+    private readonly SourceAvailability _availability;
     private readonly ResponseCache _cache = new(TimeSpan.FromMinutes(5));
+    private readonly ConcurrentDictionary<string, KnownInstance> _lastKnown = new(StringComparer.Ordinal);
 
-    public ArrSource(ArrClient client, ILogger<ArrSource> logger)
+    public ArrSource(ArrClient client, SourceAvailability availability)
     {
         _client = client;
-        _logger = logger;
+        _availability = availability;
     }
 
     public string Name => "arr";
@@ -49,7 +50,9 @@ public class ArrSource : IAddedDateSource
             string? app = null;
             try
             {
-                app = (await _cache.GetAsync("status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
+                app = (await FetchAsync(instance, "status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
+                var rootFolders = await FetchAsync(instance, "root folders " + instance.Url, token => _client.GetRootFoldersAsync(instance, token), cancellationToken).ConfigureAwait(false);
+                _lastKnown[instance.Url] = new KnownInstance(app, rootFolders);
                 switch (app)
                 {
                     case "Sonarr":
@@ -60,10 +63,11 @@ public class ArrSource : IAddedDateSource
                         break;
                 }
             }
-            catch (ArrException ex)
+            catch (SourceException)
             {
-                var unanswered = remaining.Where(item => !candidates.ContainsKey(item.Id) && MayManage(app, item)).ToList();
-                _logger.LogWarning("{Url} unavailable, skipping it for {Count} item(s): {Message}", instance.Url, unanswered.Count, ex.Message);
+                var known = _lastKnown.GetValueOrDefault(instance.Url);
+                app ??= known?.App;
+                var unanswered = remaining.Where(item => !candidates.ContainsKey(item.Id) && MayManage(app, known?.RootFolders, item)).ToList();
                 var reason = string.Create(CultureInfo.InvariantCulture, $"{app ?? "Sonarr/Radarr"} at {instance.Url} is unavailable");
                 foreach (var item in unanswered)
                 {
@@ -82,12 +86,16 @@ public class ArrSource : IAddedDateSource
         return new SourceAnswers(candidates, failures);
     }
 
-    private static bool MayManage(string? app, BaseItem item) => app switch
+    private static bool MayManage(string? app, IReadOnlyList<string>? rootFolders, BaseItem item)
     {
-        "Sonarr" => item is Episode,
-        "Radarr" => item is Movie,
-        _ => true,
-    };
+        var isItsKind = app switch
+        {
+            "Sonarr" => item is Episode,
+            "Radarr" => item is Movie,
+            _ => true,
+        };
+        return isItsKind && (rootFolders is null || rootFolders.Any(folder => ArrPaths.IsWithin(item.Path, folder)));
+    }
 
     private static AddedDateCandidate ToCandidate(string app, BaseItem item, ArrLineageStart start)
     {
@@ -109,7 +117,8 @@ public class ArrSource : IAddedDateSource
             return;
         }
 
-        var byPath = await _cache.GetAsync(
+        var byPath = await FetchAsync(
+                instance,
                 "movies " + instance.Url,
                 async token => IndexByFilePath(await _client.GetMoviesAsync(instance, token).ConfigureAwait(false)),
                 cancellationToken)
@@ -118,7 +127,8 @@ public class ArrSource : IAddedDateSource
         {
             if (byPath.TryGetValue(movie.Path, out var arrMovie))
             {
-                var history = await _cache.GetAsync(
+                var history = await FetchAsync(
+                        instance,
                         string.Create(CultureInfo.InvariantCulture, $"movie history {instance.Url} {arrMovie.MovieId}"),
                         token => _client.GetMovieHistoryAsync(instance, arrMovie.MovieId, token),
                         cancellationToken)
@@ -149,7 +159,7 @@ public class ArrSource : IAddedDateSource
             return;
         }
 
-        var allSeries = await _cache.GetAsync("series " + instance.Url, token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
+        var allSeries = await FetchAsync(instance, "series " + instance.Url, token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
         foreach (var episode in episodes)
         {
             var show = allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length);
@@ -159,14 +169,14 @@ public class ArrSource : IAddedDateSource
             }
 
             var key = string.Create(CultureInfo.InvariantCulture, $"{instance.Url} {show.Id}");
-            var files = await _cache.GetAsync("episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+            var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
             if (files.FirstOrDefault(file => file.Path == episode.Path) is not { } file)
             {
                 continue;
             }
 
-            var arrEpisodes = await _cache.GetAsync("episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
-            var history = await _cache.GetAsync("series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+            var arrEpisodes = await FetchAsync(instance, "episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+            var history = await FetchAsync(instance, "series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
             var start = arrEpisodes
                 .Where(arrEpisode => arrEpisode.EpisodeFileId == file.Id)
                 .Select(arrEpisode => ArrLineage.FindStart(history.Where(e => e.ItemId == arrEpisode.Id), file, PluginSettings.ReplacementWindow))
@@ -179,4 +189,12 @@ public class ArrSource : IAddedDateSource
             }
         }
     }
+
+    private Task<T> FetchAsync<T>(ArrConnection instance, string cacheKey, Func<CancellationToken, Task<T>> fetch, CancellationToken cancellationToken)
+    {
+        var service = _lastKnown.TryGetValue(instance.Url, out var known) ? known.App + " at " + instance.Url : instance.Url;
+        return _cache.GetAsync(cacheKey, token => _availability.CallAsync("arr " + instance.Url, service, fetch, token), cancellationToken);
+    }
+
+    private sealed record KnownInstance(string App, IReadOnlyList<string> RootFolders);
 }

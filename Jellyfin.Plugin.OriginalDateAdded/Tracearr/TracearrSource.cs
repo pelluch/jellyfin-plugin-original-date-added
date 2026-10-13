@@ -20,12 +20,14 @@ public class TracearrSource : IAddedDateSource
     private static readonly MetadataProvider[] _showProviders = [MetadataProvider.Tvdb, MetadataProvider.Tmdb, MetadataProvider.Imdb];
 
     private readonly TracearrClient _client;
+    private readonly SourceAvailability _availability;
     private readonly ILibraryManager _libraryManager;
     private readonly ILogger<TracearrSource> _logger;
 
-    public TracearrSource(TracearrClient client, ILibraryManager libraryManager, ILogger<TracearrSource> logger)
+    public TracearrSource(TracearrClient client, SourceAvailability availability, ILibraryManager libraryManager, ILogger<TracearrSource> logger)
     {
         _client = client;
+        _availability = availability;
         _libraryManager = libraryManager;
         _logger = logger;
     }
@@ -64,9 +66,8 @@ public class TracearrSource : IAddedDateSource
             {
                 (reference, copies) = await FindCopiesAsync(item, connection, cancellationToken).ConfigureAwait(false);
             }
-            catch (TracearrException ex)
+            catch (SourceException)
             {
-                _logger.LogWarning("Tracearr unavailable, skipping it for {Count} item(s): {Message}", items.Count - i, ex.Message);
                 foreach (var unanswered in items.Skip(i).Select(sourceItem => sourceItem.Item).Where(ItemIdentity.IsSupported))
                 {
                     failures[unanswered.Id] = "Tracearr is unavailable";
@@ -98,6 +99,9 @@ public class TracearrSource : IAddedDateSource
         MetadataProvider.Tvdb => "tvdb",
         _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, null),
     };
+
+    private Task<T> CallAsync<T>(TracearrConnection connection, Func<CancellationToken, Task<T>> call, CancellationToken cancellationToken)
+        => _availability.CallAsync("tracearr " + connection.Url, "Tracearr at " + connection.Url, call, cancellationToken);
 
     private AddedDateCandidate? FollowChain(List<TracearrCopy> copies, DateTime scannedAt, TimeSpan window, string reference)
     {
@@ -191,7 +195,7 @@ public class TracearrSource : IAddedDateSource
             if (item.TryGetProviderId(provider, out var id))
             {
                 var reference = $"{type}:{ReferenceName(provider)}:{id}";
-                var copies = await _client.GetCopiesAsync(connection, reference, cancellationToken).ConfigureAwait(false);
+                var copies = await CallAsync(connection, token => _client.GetCopiesAsync(connection, reference, token), cancellationToken).ConfigureAwait(false);
                 if (copies is not null)
                 {
                     return (reference, copies);
@@ -222,19 +226,19 @@ public class TracearrSource : IAddedDateSource
             }
 
             var show = $"show:{ReferenceName(provider)}:{id}";
-            var seasons = await _client.GetChildrenAsync(connection, show, cancellationToken).ConfigureAwait(false);
+            var seasons = await CallAsync(connection, token => _client.GetChildrenAsync(connection, show, token), cancellationToken).ConfigureAwait(false);
             if (seasons.FirstOrDefault(child => child.SeasonNumber == season) is not { } seasonChild)
             {
                 continue;
             }
 
-            var episodes = await _client.GetChildrenAsync(connection, seasonChild.Id, cancellationToken).ConfigureAwait(false);
+            var episodes = await CallAsync(connection, token => _client.GetChildrenAsync(connection, seasonChild.Id, token), cancellationToken).ConfigureAwait(false);
             if (episodes.FirstOrDefault(child => child.EpisodeNumber == number) is not { } episodeChild)
             {
                 continue;
             }
 
-            var copies = await _client.GetCopiesAsync(connection, episodeChild.Id, cancellationToken).ConfigureAwait(false);
+            var copies = await CallAsync(connection, token => _client.GetCopiesAsync(connection, episodeChild.Id, token), cancellationToken).ConfigureAwait(false);
             return (string.Create(CultureInfo.InvariantCulture, $"{show} S{season:00}E{number:00}"), copies);
         }
 

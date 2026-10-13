@@ -1,8 +1,9 @@
 using System;
+using Jellyfin.Plugin.OriginalDateAdded.Sources;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Arr;
 
-public class ArrException : Exception
+public class ArrException : SourceException
 {
     public ArrException()
     {

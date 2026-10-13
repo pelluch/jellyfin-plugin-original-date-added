@@ -65,7 +65,10 @@ public class JellystatClient
                     HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "Jellystat rejected the API key",
                     HttpStatusCode.NotFound => "Jellystat's API was not found at this URL",
                     _ => string.Create(CultureInfo.InvariantCulture, $"Jellystat returned HTTP {(int)response.StatusCode}"),
-                });
+                })
+                {
+                    IsTransient = (int)response.StatusCode >= 500 || response.StatusCode == HttpStatusCode.TooManyRequests,
+                };
             }
 
             return await response.Content.ReadFromJsonAsync<List<T>>(_jsonOptions, timeout.Token).ConfigureAwait(false)
@@ -73,11 +76,11 @@ public class JellystatClient
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new JellystatException(string.Create(CultureInfo.InvariantCulture, $"Jellystat did not respond within {_timeout.TotalSeconds} seconds"));
+            throw new JellystatException(string.Create(CultureInfo.InvariantCulture, $"Jellystat did not respond within {_timeout.TotalSeconds} seconds")) { IsTransient = true };
         }
         catch (HttpRequestException ex)
         {
-            throw new JellystatException("Could not reach Jellystat: " + ex.Message, ex);
+            throw new JellystatException("Could not reach Jellystat: " + ex.Message, ex) { IsTransient = true };
         }
         catch (JsonException ex)
         {

@@ -20,15 +20,17 @@ public class JellystatSource : IAddedDateSource
     private static readonly string[] _showCollectionTypes = ["tvshows", "mixed"];
 
     private readonly JellystatClient _client;
+    private readonly SourceAvailability _availability;
     private readonly ILibraryManager _libraryManager;
     private readonly IApplicationHost _applicationHost;
     private readonly ILogger<JellystatSource> _logger;
     private readonly Lock _cacheLock = new();
     private readonly Dictionary<string, (DateTime FetchedAt, Task Response)> _cache = [];
 
-    public JellystatSource(JellystatClient client, ILibraryManager libraryManager, IApplicationHost applicationHost, ILogger<JellystatSource> logger)
+    public JellystatSource(JellystatClient client, SourceAvailability availability, ILibraryManager libraryManager, IApplicationHost applicationHost, ILogger<JellystatSource> logger)
     {
         _client = client;
+        _availability = availability;
         _libraryManager = libraryManager;
         _applicationHost = applicationHost;
         _logger = logger;
@@ -71,9 +73,8 @@ public class JellystatSource : IAddedDateSource
                 done++;
             }
         }
-        catch (JellystatException ex)
+        catch (SourceException)
         {
-            _logger.LogWarning("Jellystat unavailable, skipping it for {Count} item(s): {Message}", items.Count - done, ex.Message);
             foreach (var unanswered in items.Skip(done).Select(sourceItem => sourceItem.Item).Where(ItemIdentity.IsSupported))
             {
                 failures[unanswered.Id] = "Jellystat is unavailable";
@@ -238,7 +239,8 @@ public class JellystatSource : IAddedDateSource
                     _cache.Remove(expired);
                 }
 
-                response = fetch(CancellationToken.None); // shared with concurrent callers, so one caller's cancellation mustn't fail it
+                // shared with concurrent callers, so one caller's cancellation mustn't fail it
+                response = _availability.CallAsync("jellystat " + connection.Url, "Jellystat at " + connection.Url, fetch, CancellationToken.None);
                 _cache[key] = (now, response);
             }
         }
