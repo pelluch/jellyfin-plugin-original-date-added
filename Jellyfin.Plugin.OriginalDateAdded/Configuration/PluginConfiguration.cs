@@ -29,10 +29,4 @@ public class PluginConfiguration : BasePluginConfiguration
     public string TracearrServerId { get; set; } = string.Empty;
 
     public string TracearrServerName { get; set; } = string.Empty;
-
-    public bool JellystatEnabled { get; set; }
-
-    public string JellystatUrl { get; set; } = string.Empty;
-
-    public string JellystatApiKey { get; set; } = string.Empty;
 }
