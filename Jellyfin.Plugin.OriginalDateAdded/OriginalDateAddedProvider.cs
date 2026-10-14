@@ -57,7 +57,7 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
                 }
                 else if (!resolution.Failures.ContainsKey(item.Id))
                 {
-                    _logger.Log(PluginSettings.DetailLevel, "No earlier date added found for {Name} ({ItemId})", item.Name, item.Id);
+                    _logger.Log(PluginSettings.DetailLevel, "No date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
             }
 

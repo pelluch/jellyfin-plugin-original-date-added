@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
@@ -48,8 +49,18 @@ public class AddedDateApplier
 
     public bool Record(BaseItem item, AddedDateDecision decision, string reason, bool dryRun)
     {
-        if (!IsChange(item, decision))
+        if (WhyUnchanged(item, decision) is { } why)
         {
+            _logger.Log(
+                PluginSettings.DetailLevel,
+                "Leaving date added of {Name} ({ItemId}) at {Current} as it is: {Source} has {AddedAt} ({Detail}), which {Why}",
+                item.Name,
+                item.Id,
+                item.DateCreated,
+                decision.Entry.Source,
+                decision.Entry.AddedAt,
+                decision.Detail,
+                why);
             return false;
         }
 
@@ -87,17 +98,33 @@ public class AddedDateApplier
         return true;
     }
 
-    private bool IsChange(BaseItem item, AddedDateDecision decision)
+    // Null when the decision changes the item's date
+    private string? WhyUnchanged(BaseItem item, AddedDateDecision decision)
     {
         var addedAt = decision.Entry.AddedAt;
         var stored = _store.GetItem(item.Id);
+        var minimum = PluginSettings.MinimumDifference;
         if (decision.Entry.Authoritative)
         {
-            return (addedAt - item.DateCreated).Duration() >= PluginSettings.MinimumDifference && stored?.AddedAt != addedAt;
+            if (stored?.AddedAt == addedAt)
+            {
+                return "is already recorded";
+            }
+
+            return (addedAt - item.DateCreated).Duration() < minimum
+                ? string.Create(CultureInfo.InvariantCulture, $"is within {minimum.TotalMinutes:0.##} minutes of it")
+                : null;
         }
 
-        var isEarlier = addedAt <= item.DateCreated - PluginSettings.MinimumDifference;
+        if (stored is not null && stored.AddedAt <= addedAt)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"is no earlier than the recorded {stored.AddedAt} from {stored.Source}");
+        }
+
+        var isEarlier = addedAt <= item.DateCreated - minimum;
         var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date;
-        return (isEarlier || isBeforeServerSetUp) && !(stored is not null && stored.AddedAt <= addedAt);
+        return isEarlier || isBeforeServerSetUp
+            ? null
+            : string.Create(CultureInfo.InvariantCulture, $"isn't at least {minimum.TotalMinutes:0.##} minutes earlier");
     }
 }

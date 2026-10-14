@@ -78,8 +78,14 @@ public class RestoreOriginalDatesTask : IScheduledTask
             skipped += resolution.Failures.Count;
             foreach (var item in chunk)
             {
-                if (resolution.Decisions.TryGetValue(item.Id, out var decision)
-                    && await _applier.ApplyAsync(item, decision, "by the Restore original dates added task", cancellationToken).ConfigureAwait(false))
+                if (!resolution.Decisions.TryGetValue(item.Id, out var decision))
+                {
+                    if (!resolution.Failures.ContainsKey(item.Id))
+                    {
+                        _logger.Log(PluginSettings.DetailLevel, "No date added found for {Name} ({ItemId})", item.Name, item.Id);
+                    }
+                }
+                else if (await _applier.ApplyAsync(item, decision, "by the Restore original dates added task", cancellationToken).ConfigureAwait(false))
                 {
                     updated++;
                 }
