@@ -19,14 +19,4 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool ArrEnabled { get; set; }
 
     public Collection<ArrConnection> ArrInstances { get; init; } = [];
-
-    public bool TracearrEnabled { get; set; }
-
-    public string TracearrUrl { get; set; } = string.Empty;
-
-    public string TracearrApiKey { get; set; } = string.Empty;
-
-    public string TracearrServerId { get; set; } = string.Empty;
-
-    public string TracearrServerName { get; set; } = string.Empty;
 }

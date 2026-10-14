@@ -1,7 +1,6 @@
 using Jellyfin.Plugin.OriginalDateAdded.Arr;
 using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using Jellyfin.Plugin.OriginalDateAdded.Store;
-using Jellyfin.Plugin.OriginalDateAdded.Tracearr;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -20,9 +19,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         // Order matters here. Sources defined first run first.
         serviceCollection.AddSingleton<IAddedDateSource, ArrSource>();
         serviceCollection.AddSingleton<IAddedDateSource, RemovedItemsSource>();
-        serviceCollection.AddSingleton<IAddedDateSource, TracearrSource>();
         serviceCollection.AddHostedService<RemovedItemsRecorder>();
-        serviceCollection.AddSingleton<TracearrClient>();
         serviceCollection.AddSingleton<ArrClient>();
         serviceCollection.AddSingleton<ArrTester>();
     }

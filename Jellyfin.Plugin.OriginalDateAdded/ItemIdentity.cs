@@ -23,13 +23,6 @@ public static class ItemIdentity
         return item.GetUserDataKeys().Where(key => key != ownKey).ToList();
     }
 
-    public static bool IsDifferentContent(BaseItem item, BaseItem other)
-    {
-        var keys = ContentKeys(item);
-        var otherKeys = ContentKeys(other);
-        return keys.Count > 0 && otherKeys.Count > 0 && !keys.Intersect(otherKeys).Any();
-    }
-
     public static string Describe(BaseItem item) => item switch
     {
         Episode { ParentIndexNumber: { } season, IndexNumber: { } number } episode
