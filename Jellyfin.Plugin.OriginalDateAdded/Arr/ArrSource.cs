@@ -51,8 +51,8 @@ public class ArrSource : IAddedDateSource
             try
             {
                 app = (await FetchAsync(instance, "status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
-                var rootFolders = await FetchAsync(instance, "root folders " + instance.Url, token => _client.GetRootFoldersAsync(instance, token), cancellationToken).ConfigureAwait(false);
-                _lastKnown[instance.Url] = new KnownInstance(app, rootFolders);
+                var rootFolders = await FetchAsync(instance, "root folders " + CacheKey(instance), token => _client.GetRootFoldersAsync(instance, token), cancellationToken).ConfigureAwait(false);
+                _lastKnown[instance.Url] = new KnownInstance(app, rootFolders.Select(folder => folder.Path).ToList());
                 switch (app)
                 {
                     case "Sonarr":
@@ -97,6 +97,9 @@ public class ArrSource : IAddedDateSource
         return isItsKind && (rootFolders is null || rootFolders.Any(folder => ArrPaths.IsWithin(item.Path, folder)));
     }
 
+    private static string CacheKey(ArrConnection instance) =>
+        instance.Url + string.Concat(instance.PathMappings.Select(mapping => " " + mapping.ArrPath + "=>" + mapping.JellyfinPath));
+
     private static AddedDateCandidate ToCandidate(string app, BaseItem item, ArrLineageStart start)
     {
         var detail = start.IsImport
@@ -119,7 +122,7 @@ public class ArrSource : IAddedDateSource
 
         var byPath = await FetchAsync(
                 instance,
-                "movies " + instance.Url,
+                "movies " + CacheKey(instance),
                 async token => IndexByFilePath(await _client.GetMoviesAsync(instance, token).ConfigureAwait(false)),
                 cancellationToken)
             .ConfigureAwait(false);
@@ -159,7 +162,7 @@ public class ArrSource : IAddedDateSource
             return;
         }
 
-        var allSeries = await FetchAsync(instance, "series " + instance.Url, token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
+        var allSeries = await FetchAsync(instance, "series " + CacheKey(instance), token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
         foreach (var episode in episodes)
         {
             var show = allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length);
@@ -168,7 +171,7 @@ public class ArrSource : IAddedDateSource
                 continue;
             }
 
-            var key = string.Create(CultureInfo.InvariantCulture, $"{instance.Url} {show.Id}");
+            var key = string.Create(CultureInfo.InvariantCulture, $"{CacheKey(instance)} {show.Id}");
             var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
             if (files.FirstOrDefault(file => file.Path == episode.Path) is not { } file)
             {

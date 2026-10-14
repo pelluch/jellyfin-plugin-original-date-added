@@ -37,23 +37,33 @@ public class ArrClient
         return new ArrStatus(status.AppName, status.Version);
     }
 
-    public async Task<IReadOnlyList<string>> GetRootFoldersAsync(ArrConnection connection, CancellationToken cancellationToken)
+    // Paths of folders and files come back as Jellyfin sees them, while history paths stay as the arr wrote them.
+    public async Task<IReadOnlyList<ArrRootFolder>> GetRootFoldersAsync(ArrConnection connection, CancellationToken cancellationToken)
     {
         var folders = await GetAsync<List<RootFolderDto>>(connection, "rootfolder", cancellationToken).ConfigureAwait(false);
-        return folders.Select(folder => folder.Path).ToList();
+        return folders.Select(folder => new ArrRootFolder(folder.Path, ArrPaths.Map(folder.Path, connection.PathMappings))).ToList();
     }
 
     public async Task<IReadOnlyList<ArrSeries>> GetSeriesAsync(ArrConnection connection, CancellationToken cancellationToken)
-        => await GetAsync<List<ArrSeries>>(connection, "series", cancellationToken).ConfigureAwait(false);
+    {
+        var series = await GetAsync<List<ArrSeries>>(connection, "series", cancellationToken).ConfigureAwait(false);
+        return series.Select(show => show with { Path = ArrPaths.Map(show.Path, connection.PathMappings) }).ToList();
+    }
 
     public async Task<IReadOnlyList<ArrFile>> GetEpisodeFilesAsync(ArrConnection connection, int seriesId, CancellationToken cancellationToken)
-        => await GetAsync<List<ArrFile>>(connection, string.Create(CultureInfo.InvariantCulture, $"episodefile?seriesId={seriesId}"), cancellationToken).ConfigureAwait(false);
+    {
+        var files = await GetAsync<List<ArrFile>>(connection, string.Create(CultureInfo.InvariantCulture, $"episodefile?seriesId={seriesId}"), cancellationToken).ConfigureAwait(false);
+        return files.Select(file => file with { Path = ArrPaths.Map(file.Path, connection.PathMappings) }).ToList();
+    }
 
     public async Task<IReadOnlyList<ArrEpisode>> GetEpisodesAsync(ArrConnection connection, int seriesId, CancellationToken cancellationToken)
         => await GetAsync<List<ArrEpisode>>(connection, string.Create(CultureInfo.InvariantCulture, $"episode?seriesId={seriesId}"), cancellationToken).ConfigureAwait(false);
 
     public async Task<IReadOnlyList<ArrMovie>> GetMoviesAsync(ArrConnection connection, CancellationToken cancellationToken)
-        => await GetAsync<List<ArrMovie>>(connection, "movie", cancellationToken).ConfigureAwait(false);
+    {
+        var movies = await GetAsync<List<ArrMovie>>(connection, "movie", cancellationToken).ConfigureAwait(false);
+        return movies.Select(movie => movie.MovieFile is { } file ? movie with { MovieFile = file with { Path = ArrPaths.Map(file.Path, connection.PathMappings) } } : movie).ToList();
+    }
 
     public Task<IReadOnlyList<ArrEvent>> GetSeriesHistoryAsync(ArrConnection connection, int seriesId, CancellationToken cancellationToken)
         => GetHistoryAsync(connection, string.Create(CultureInfo.InvariantCulture, $"history/series?seriesId={seriesId}"), _sonarrHistory, record => record.EpisodeId, cancellationToken);

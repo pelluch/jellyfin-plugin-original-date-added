@@ -49,7 +49,7 @@
                                 <input id="ArrEnabled" name="ArrEnabled" type="checkbox" is="emby-checkbox" />
                                 <span>Use Sonarr and Radarr</span>
                             </label>
-                            <div class="fieldDescription checkboxFieldDescription">When enabled, movies and episodes managed by Sonarr or Radarr get their date added from Sonarr's and Radarr's import history. Currently, the plugin requires Jellyfin seeing them at the same path.</div>
+                            <div class="fieldDescription checkboxFieldDescription">When enabled, movies and episodes managed by Sonarr or Radarr get their date added from Sonarr's and Radarr's import history. Files are matched by path: If the Jellyfin and arr paths don't match, add path mappings.</div>
                         </div>
                         <div id="ArrInstances"></div>
                         <button is="emby-button" type="button" id="ArrAdd" class="raised emby-button">
@@ -151,6 +151,11 @@
                         '<input id="ArrApiKey' + id + '" class="arrApiKey" type="password" is="emby-input" autocomplete="off" />' +
                         '<div class="fieldDescription">Settings → General → API Key in Sonarr or Radarr.</div>' +
                     '</div>' +
+                    '<div class="arrMappings"></div>' +
+                    '<div style="margin-bottom:1em;">' +
+                        '<button is="emby-button" type="button" class="raised emby-button arrAddMapping"><span>Add path mapping</span></button>' +
+                        '<div class="fieldDescription">Only needed when Jellyfin sees this instance\'s files at another path, e.g. /tv in Sonarr and /data/media/tv in Jellyfin.</div>' +
+                    '</div>' +
                     '<div>' +
                         '<button is="emby-button" type="button" class="raised emby-button arrTest"><span>Test</span></button>' +
                         '<button is="emby-button" type="button" class="raised emby-button arrRemove"><span>Remove</span></button>' +
@@ -159,6 +164,12 @@
                 document.querySelector('#ArrInstances').appendChild(row);
                 row.querySelector('.arrUrl').value = instance.Url;
                 row.querySelector('.arrApiKey').value = instance.ApiKey;
+                (instance.PathMappings || []).forEach(function (mapping) {
+                    addArrMapping(row, mapping);
+                });
+                row.querySelector('.arrAddMapping').addEventListener('click', function () {
+                    addArrMapping(row, { ArrPath: '', JellyfinPath: '' });
+                });
                 row.querySelector('.arrRemove').addEventListener('click', function () {
                     row.remove();
                 });
@@ -179,10 +190,46 @@
                 });
             }
 
+            var arrMappingCount = 0;
+
+            function addArrMapping(row, mapping) {
+                var id = arrMappingCount++;
+                var line = document.createElement('div');
+                line.className = 'arrMapping';
+                line.style.display = 'flex';
+                line.style.flexWrap = 'wrap';
+                line.style.gap = '0 1em';
+                line.style.alignItems = 'flex-end';
+                line.innerHTML =
+                    '<div class="inputContainer" style="flex:1 1 15em;">' +
+                        '<label class="inputLabel inputLabelUnfocused" for="ArrMappingFrom' + id + '">Path in Sonarr/Radarr</label>' +
+                        '<input id="ArrMappingFrom' + id + '" class="arrMappingFrom" type="text" is="emby-input" placeholder="/tv" />' +
+                    '</div>' +
+                    '<div class="inputContainer" style="flex:1 1 15em;">' +
+                        '<label class="inputLabel inputLabelUnfocused" for="ArrMappingTo' + id + '">Path in Jellyfin</label>' +
+                        '<input id="ArrMappingTo' + id + '" class="arrMappingTo" type="text" is="emby-input" placeholder="/data/media/tv" />' +
+                    '</div>' +
+                    '<div class="inputContainer">' +
+                        '<button is="emby-button" type="button" class="raised emby-button arrRemoveMapping"><span>Remove</span></button>' +
+                    '</div>';
+                row.querySelector('.arrMappings').appendChild(line);
+                line.querySelector('.arrMappingFrom').value = mapping.ArrPath;
+                line.querySelector('.arrMappingTo').value = mapping.JellyfinPath;
+                line.querySelector('.arrRemoveMapping').addEventListener('click', function () {
+                    line.remove();
+                });
+            }
+
             function readArrInstance(row) {
                 return {
                     Url: row.querySelector('.arrUrl').value.trim(),
-                    ApiKey: row.querySelector('.arrApiKey').value.trim()
+                    ApiKey: row.querySelector('.arrApiKey').value.trim(),
+                    PathMappings: Array.prototype.map.call(row.querySelectorAll('.arrMapping'), function (line) {
+                        return {
+                            ArrPath: line.querySelector('.arrMappingFrom').value.trim(),
+                            JellyfinPath: line.querySelector('.arrMappingTo').value.trim()
+                        };
+                    }).filter(function (mapping) { return mapping.ArrPath || mapping.JellyfinPath; })
                 };
             }
 
@@ -260,7 +307,7 @@
 
             document.querySelector('#ArrAdd')
                 .addEventListener('click', function () {
-                    addArrInstance({ Url: '', ApiKey: '' });
+                    addArrInstance({ Url: '', ApiKey: '', PathMappings: [] });
                 });
 
             document.querySelector('#ClearData')
@@ -325,7 +372,7 @@
                         document.querySelector('#VerboseLogging').checked = config.VerboseLogging;
                         document.querySelector('#ArrEnabled').checked = config.ArrEnabled;
                         document.querySelector('#ArrInstances').innerHTML = '';
-                        (config.ArrInstances.length ? config.ArrInstances : [{ Url: '', ApiKey: '' }]).forEach(addArrInstance);
+                        (config.ArrInstances.length ? config.ArrInstances : [{ Url: '', ApiKey: '', PathMappings: [] }]).forEach(addArrInstance);
                         document.querySelector('#TracearrEnabled').checked = config.TracearrEnabled;
                         document.querySelector('#TracearrUrl').value = config.TracearrUrl;
                         document.querySelector('#TracearrApiKey').value = config.TracearrApiKey;

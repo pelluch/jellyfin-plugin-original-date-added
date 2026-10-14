@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Arr;
@@ -40,7 +39,7 @@ public static class ArrLineage
                     {
                         Appear(e.Date, isImport: false);
                     }
-                    else if (Path.GetFileName(e.Path) != current)
+                    else if (ArrPaths.FileName(e.Path) != current)
                     {
                         continue; // Some older file
                     }
@@ -59,7 +58,7 @@ public static class ArrLineage
                         Appear(e.Date, isImport: true);
                     }
 
-                    current = Path.GetFileName(e.Path);
+                    current = ArrPaths.FileName(e.Path);
                     break;
                 case ArrEventKind.Renamed:
                     if (current is null)
@@ -67,12 +66,12 @@ public static class ArrLineage
                         Appear(e.Date, isImport: false);
                     }
 
-                    current = Path.GetFileName(e.Path);
+                    current = ArrPaths.FileName(e.Path);
                     break;
             }
         }
 
-        if (current != Path.GetFileName(currentFile.Path))
+        if (current != ArrPaths.FileName(currentFile.Path))
         {
             Appear(currentFile.DateAdded, isImport: false); // picked up without an import or a rename
         }
