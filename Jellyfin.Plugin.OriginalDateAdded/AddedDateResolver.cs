@@ -15,20 +15,17 @@ public class AddedDateResolver
 {
     private readonly IEnumerable<IAddedDateSource> _sources;
     private readonly AddedDateStore _store;
-    private readonly ServerSetup _serverSetup;
     private readonly ILogger<AddedDateResolver> _logger;
 
-    public AddedDateResolver(IEnumerable<IAddedDateSource> sources, AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateResolver> logger)
+    public AddedDateResolver(IEnumerable<IAddedDateSource> sources, AddedDateStore store, ILogger<AddedDateResolver> logger)
     {
         _sources = sources;
         _store = store;
-        _serverSetup = serverSetup;
         _logger = logger;
     }
 
     public async Task<AddedDateResolution> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
     {
-        var serverSetUpAt = _serverSetup.Date;
         var sourceItems = items
             .DistinctBy(item => item.Id)
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
@@ -59,7 +56,7 @@ public class AddedDateResolver
 
                 if (candidate.IsAuthoritative)
                 {
-                    var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
+                    var (addedAt, detail) = (candidate.AddedAt, candidate.Detail);
                     decisions[item.Id] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt, Authoritative: true), detail);
                 }
                 else
@@ -77,7 +74,7 @@ public class AddedDateResolver
         foreach (var (sourceName, itemId, candidate) in others)
         {
             if (undecided.TryGetValue(itemId, out var scannedAt)
-                && DecideOrdinary(itemId, candidate, sourceName, scannedAt, serverSetUpAt) is { } decision
+                && DecideOrdinary(itemId, candidate, sourceName, scannedAt) is { } decision
                 && (!decisions.TryGetValue(itemId, out var current) || decision.Entry.AddedAt < current.Entry.AddedAt))
             {
                 decisions[itemId] = decision;
@@ -95,24 +92,10 @@ public class AddedDateResolver
         return new AddedDateResolution(decisions, failures);
     }
 
-    private static (DateTime AddedAt, string Detail) ClampToServerSetUp(AddedDateCandidate candidate, DateTime? serverSetUpAt)
-        => serverSetUpAt is { } setUpAt && candidate.AddedAt < setUpAt
-            ? (setUpAt, string.Create(CultureInfo.InvariantCulture, $"{candidate.Detail}, {candidate.AddedAt:u} is before this server was set up"))
-            : (candidate.AddedAt, candidate.Detail);
-
-    private AddedDateDecision? DecideOrdinary(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt, DateTime? serverSetUpAt)
+    private AddedDateDecision? DecideOrdinary(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt)
     {
-        var (addedAt, detail) = ClampToServerSetUp(candidate, serverSetUpAt);
-        if (serverSetUpAt is { } setUpAt && scannedAt < setUpAt)
-        {
-            // The item's own date can't be right, so any record of its content gives it the setup date.
-            if (addedAt > setUpAt)
-            {
-                detail = string.Create(CultureInfo.InvariantCulture, $"{detail}, this item's date {scannedAt:u} is before this server was set up");
-                addedAt = setUpAt;
-            }
-        }
-        else if (!IsAcceptable(itemId, candidate, sourceName, scannedAt))
+        var (addedAt, detail) = (candidate.AddedAt, candidate.Detail);
+        if (!IsAcceptable(itemId, candidate, sourceName, scannedAt))
         {
             return null;
         }

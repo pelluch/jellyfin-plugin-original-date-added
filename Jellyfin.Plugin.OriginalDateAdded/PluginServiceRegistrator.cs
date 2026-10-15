@@ -12,7 +12,6 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<AddedDateStore>();
-        serviceCollection.AddSingleton<ServerSetup>();
         serviceCollection.AddSingleton<AddedDateResolver>();
         serviceCollection.AddSingleton<AddedDateApplier>();
         serviceCollection.AddSingleton<SourceAvailability>();

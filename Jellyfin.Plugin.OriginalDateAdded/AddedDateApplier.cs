@@ -12,14 +12,12 @@ public class AddedDateApplier
 {
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateStore _store;
-    private readonly ServerSetup _serverSetup;
     private readonly ILogger<AddedDateApplier> _logger;
 
-    public AddedDateApplier(ILibraryManager libraryManager, AddedDateStore store, ServerSetup serverSetup, ILogger<AddedDateApplier> logger)
+    public AddedDateApplier(ILibraryManager libraryManager, AddedDateStore store, ILogger<AddedDateApplier> logger)
     {
         _libraryManager = libraryManager;
         _store = store;
-        _serverSetup = serverSetup;
         _logger = logger;
     }
 
@@ -122,8 +120,7 @@ public class AddedDateApplier
         }
 
         var isEarlier = addedAt <= item.DateCreated - minimum;
-        var isBeforeServerSetUp = item.DateCreated < _serverSetup.Date;
-        return isEarlier || isBeforeServerSetUp
+        return isEarlier
             ? null
             : string.Create(CultureInfo.InvariantCulture, $"isn't at least {minimum.TotalMinutes:0.##} minutes earlier");
     }
