@@ -102,7 +102,7 @@ public class AddedDateApplier
         var addedAt = decision.Entry.AddedAt;
         var stored = _store.GetItem(item.Id);
         var minimum = PluginSettings.MinimumDifference;
-        if (decision.Entry.Authoritative)
+        if (decision.IsAuthoritative)
         {
             if (stored?.AddedAt == addedAt)
             {

@@ -18,8 +18,6 @@ public class RemovedItemsSource : IAddedDateSource
 
     public string Name => "removed-items";
 
-    public bool CanAnswerAuthoritatively => false;
-
     public Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var candidates = new Dictionary<Guid, AddedDateCandidate>();

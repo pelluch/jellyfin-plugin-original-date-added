@@ -37,8 +37,7 @@ public class AddedDateResolver
         {
             var pending = sourceItems
                 .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
-                    && !failures.ContainsKey(sourceItem.Item.Id)
-                    && (source.CanAnswerAuthoritatively || !HasAuthoritativeDecision(sourceItem.Item.Id)))
+                    && !failures.ContainsKey(sourceItem.Item.Id))
                 .ToList();
             var answers = await GetAnswersAsync(source, pending, cancellationToken).ConfigureAwait(false);
             foreach (var (item, scannedAt) in pending)
@@ -56,8 +55,7 @@ public class AddedDateResolver
 
                 if (candidate.IsAuthoritative)
                 {
-                    var (addedAt, detail) = (candidate.AddedAt, candidate.Detail);
-                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(addedAt, source.Name, scannedAt, Authoritative: true), detail);
+                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, scannedAt), candidate.Detail, IsAuthoritative: true);
                 }
                 else
                 {
@@ -68,8 +66,7 @@ public class AddedDateResolver
 
         var undecided = sourceItems
             .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)
-                && !failures.ContainsKey(sourceItem.Item.Id)
-                && !HasAuthoritativeDecision(sourceItem.Item.Id)) // An authoritative source, if any, didn't answer
+                && !failures.ContainsKey(sourceItem.Item.Id))
             .ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
         foreach (var (sourceName, itemId, candidate) in others)
         {
@@ -136,8 +133,6 @@ public class AddedDateResolver
 
         return true;
     }
-
-    private bool HasAuthoritativeDecision(Guid itemId) => _store.GetItem(itemId) is { Authoritative: true };
 
     private async Task<SourceAnswers> GetAnswersAsync(IAddedDateSource source, List<SourceItem> items, CancellationToken cancellationToken)
     {

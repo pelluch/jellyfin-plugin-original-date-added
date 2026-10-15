@@ -35,8 +35,6 @@ public class ArrSource : IAddedDateSource
 
     public string Name => "arr";
 
-    public bool CanAnswerAuthoritatively => true;
-
     public async Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var config = PluginSettings.Configuration;
