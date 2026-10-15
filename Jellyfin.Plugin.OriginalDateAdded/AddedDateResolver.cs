@@ -13,18 +13,26 @@ namespace Jellyfin.Plugin.OriginalDateAdded;
 
 public class AddedDateResolver
 {
-    private readonly IEnumerable<IAddedDateSource> _sources;
+    private readonly IAddedDateSource _removedItems;
+    private readonly IAddedDateSource _arr;
     private readonly AddedDateStore _store;
     private readonly ILogger<AddedDateResolver> _logger;
 
-    public AddedDateResolver(IEnumerable<IAddedDateSource> sources, AddedDateStore store, ILogger<AddedDateResolver> logger)
+    public AddedDateResolver(IAddedDateSource removedItems, IAddedDateSource arr, AddedDateStore store, ILogger<AddedDateResolver> logger)
     {
-        _sources = sources;
+        _removedItems = removedItems;
+        _arr = arr;
         _store = store;
         _logger = logger;
     }
 
-    public async Task<AddedDateResolution> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
+    public Task<AddedDateResolution> ResolveAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
+        => ResolveAsync(items, [_removedItems], cancellationToken);
+
+    public Task<AddedDateResolution> ResolveForBackfillAsync(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken)
+        => ResolveAsync(items, [_arr, _removedItems], cancellationToken);
+
+    private async Task<AddedDateResolution> ResolveAsync(IReadOnlyList<BaseItem> items, IReadOnlyList<IAddedDateSource> sources, CancellationToken cancellationToken)
     {
         var sourceItems = items
             .DistinctBy(item => item.Id)
@@ -33,7 +41,7 @@ public class AddedDateResolver
         var decisions = new Dictionary<Guid, AddedDateDecision>();
         var failures = new Dictionary<Guid, string>();
         var others = new List<(string Source, Guid ItemId, AddedDateCandidate Candidate)>();
-        foreach (var source in _sources)
+        foreach (var source in sources)
         {
             var pending = sourceItems
                 .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)

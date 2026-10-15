@@ -78,7 +78,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 .OfType<BaseItem>()
                 .ToList();
             removed += chunkSize - chunk.Count;
-            var resolution = await _resolver.ResolveAsync(chunk, cancellationToken).ConfigureAwait(false);
+            var resolution = await _resolver.ResolveForBackfillAsync(chunk, cancellationToken).ConfigureAwait(false);
             skipped += resolution.Failures.Count;
             foreach (var item in chunk)
             {
