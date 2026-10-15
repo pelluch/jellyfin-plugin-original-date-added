@@ -6,4 +6,4 @@ public sealed record AddedDateCandidate(
     DateTime AddedAt,
     DateTime? PredecessorRemovedAt,
     string Detail,
-    bool IsAuthoritative = false);
+    bool IsImport = false);

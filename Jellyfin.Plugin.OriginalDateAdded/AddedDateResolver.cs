@@ -39,59 +39,26 @@ public class AddedDateResolver
             .Select(item => new SourceItem(item, _store.GetItem(item.Id)?.ScannedAt ?? item.DateCreated))
             .ToList();
         var decisions = new Dictionary<Guid, AddedDateDecision>();
-        var others = new List<(string Source, Guid ItemId, AddedDateCandidate Candidate)>();
         foreach (var source in sources)
         {
-            var pending = sourceItems.Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id)).ToList();
-            var candidates = await GetCandidatesAsync(source, pending, cancellationToken).ConfigureAwait(false);
-            foreach (var (item, scannedAt) in pending)
+            var candidates = await GetCandidatesAsync(source, sourceItems, cancellationToken).ConfigureAwait(false);
+            foreach (var (item, scannedAt) in sourceItems)
             {
-                if (!candidates.TryGetValue(item.Id, out var candidate))
+                if (candidates.TryGetValue(item.Id, out var candidate)
+                    && IsAcceptable(item.Id, candidate, source.Name, scannedAt)
+                    && (!decisions.TryGetValue(item.Id, out var current) || candidate.AddedAt < current.Entry.AddedAt))
                 {
-                    continue;
+                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, scannedAt), candidate.Detail, candidate.IsImport);
                 }
-
-                if (candidate.IsAuthoritative)
-                {
-                    decisions[item.Id] = new AddedDateDecision(new ItemEntry(candidate.AddedAt, source.Name, scannedAt), candidate.Detail, IsAuthoritative: true);
-                }
-                else
-                {
-                    others.Add((source.Name, item.Id, candidate));
-                }
-            }
-        }
-
-        var undecided = sourceItems
-            .Where(sourceItem => !decisions.ContainsKey(sourceItem.Item.Id))
-            .ToDictionary(sourceItem => sourceItem.Item.Id, sourceItem => sourceItem.ScannedAt);
-        foreach (var (sourceName, itemId, candidate) in others)
-        {
-            if (undecided.TryGetValue(itemId, out var scannedAt)
-                && DecideOrdinary(itemId, candidate, sourceName, scannedAt) is { } decision
-                && (!decisions.TryGetValue(itemId, out var current) || decision.Entry.AddedAt < current.Entry.AddedAt))
-            {
-                decisions[itemId] = decision;
             }
         }
 
         return decisions;
     }
 
-    private AddedDateDecision? DecideOrdinary(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt)
-    {
-        var (addedAt, detail) = (candidate.AddedAt, candidate.Detail);
-        if (!IsAcceptable(itemId, candidate, sourceName, scannedAt))
-        {
-            return null;
-        }
-
-        return new AddedDateDecision(new ItemEntry(addedAt, sourceName, scannedAt), detail);
-    }
-
     private bool IsAcceptable(Guid itemId, AddedDateCandidate candidate, string sourceName, DateTime scannedAt)
     {
-        if (candidate.AddedAt > scannedAt - PluginSettings.MinimumDifference)
+        if (!candidate.IsImport && candidate.AddedAt > scannedAt - PluginSettings.MinimumDifference) // AddedDateApplier decides whether an import may move a date later
         {
             _logger.Log(
                 PluginSettings.DetailLevel,

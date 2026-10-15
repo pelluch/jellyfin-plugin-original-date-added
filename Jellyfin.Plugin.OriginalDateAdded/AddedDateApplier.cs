@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,26 +103,22 @@ public class AddedDateApplier
         var addedAt = decision.Entry.AddedAt;
         var stored = _store.GetItem(item.Id);
         var minimum = PluginSettings.MinimumDifference;
-        if (decision.IsAuthoritative)
-        {
-            if (stored?.AddedAt == addedAt)
-            {
-                return "is already recorded";
-            }
-
-            return (addedAt - item.DateCreated).Duration() < minimum
-                ? string.Create(CultureInfo.InvariantCulture, $"is within {minimum.TotalMinutes:0.##} minutes of it")
-                : null;
-        }
-
         if (stored is not null && stored.AddedAt <= addedAt)
         {
-            return string.Create(CultureInfo.InvariantCulture, $"is no earlier than the recorded {stored.AddedAt} from {stored.Source}");
+            return stored.AddedAt == addedAt
+                ? "is already recorded"
+                : string.Create(CultureInfo.InvariantCulture, $"is no earlier than the recorded {stored.AddedAt} from {stored.Source}");
         }
 
-        var isEarlier = addedAt <= item.DateCreated - minimum;
-        return isEarlier
-            ? null
-            : string.Create(CultureInfo.InvariantCulture, $"isn't at least {minimum.TotalMinutes:0.##} minutes earlier");
+        var difference = addedAt - item.DateCreated;
+        if (difference.Duration() < minimum)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"is within {minimum.TotalMinutes:0.##} minutes of it");
+        }
+
+        var mayMoveLater = decision.IsImport && stored is null; // e.g. replacing a file creation time from before the import
+        return difference > TimeSpan.Zero && !mayMoveLater
+            ? string.Create(CultureInfo.InvariantCulture, $"isn't at least {minimum.TotalMinutes:0.##} minutes earlier")
+            : null;
     }
 }

@@ -83,7 +83,7 @@ public class ArrSource : IAddedDateSource
             detail += string.Create(CultureInfo.InvariantCulture, $", {(start.Date - deletedAt).TotalDays:F0} days after the previous file was deleted");
         }
 
-        return new AddedDateCandidate(start.Date, null, detail, IsAuthoritative: start.IsImport);
+        return new AddedDateCandidate(start.Date, null, detail, IsImport: start.IsImport);
     }
 
     private async Task FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
