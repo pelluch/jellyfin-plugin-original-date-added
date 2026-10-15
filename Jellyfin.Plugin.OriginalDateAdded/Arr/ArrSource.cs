@@ -17,7 +17,7 @@ public class ArrSource : IAddedDateSource
     private readonly ArrClient _client;
     private readonly SourceAvailability _availability;
     private readonly ResponseCache _cache = new(TimeSpan.FromMinutes(5));
-    private readonly ConcurrentDictionary<string, KnownInstance> _lastKnown = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, string> _appNames = new(StringComparer.Ordinal);
 
     public ArrSource(ArrClient client, SourceAvailability availability)
     {
@@ -36,7 +36,6 @@ public class ArrSource : IAddedDateSource
         }
 
         var candidates = new Dictionary<Guid, AddedDateCandidate>();
-        var failures = new Dictionary<Guid, string>();
         var remaining = items.Select(sourceItem => sourceItem.Item).Where(item => ItemIdentity.IsSupported(item) && !string.IsNullOrEmpty(item.Path)).ToList();
         foreach (var instance in config.ArrInstances.Where(instance => instance.Url.Length > 0 && instance.ApiKey.Length > 0))
         {
@@ -45,12 +44,10 @@ public class ArrSource : IAddedDateSource
                 break;
             }
 
-            string? app = null;
             try
             {
-                app = (await FetchAsync(instance, "status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
-                var rootFolders = await FetchAsync(instance, "root folders " + CacheKey(instance), token => _client.GetRootFoldersAsync(instance, token), cancellationToken).ConfigureAwait(false);
-                _lastKnown[instance.Url] = new KnownInstance(app, rootFolders.Select(folder => folder.Path).ToList());
+                var app = (await FetchAsync(instance, "status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
+                _appNames[instance.Url] = app;
                 switch (app)
                 {
                     case "Sonarr":
@@ -63,36 +60,13 @@ public class ArrSource : IAddedDateSource
             }
             catch (SourceException)
             {
-                var known = _lastKnown.GetValueOrDefault(instance.Url);
-                app ??= known?.App;
-                var unanswered = remaining.Where(item => !candidates.ContainsKey(item.Id) && MayManage(app, known?.RootFolders, item)).ToList();
-                var reason = string.Create(CultureInfo.InvariantCulture, $"{app ?? "Sonarr/Radarr"} at {instance.Url} is unavailable");
-                foreach (var item in unanswered)
-                {
-                    failures.TryAdd(item.Id, reason);
-                }
+                // Its items get no answer from it this run
             }
 
             remaining.RemoveAll(item => candidates.ContainsKey(item.Id));
         }
 
-        foreach (var itemId in candidates.Keys)
-        {
-            failures.Remove(itemId); // answered by another instance
-        }
-
-        return new SourceAnswers(candidates, failures);
-    }
-
-    private static bool MayManage(string? app, IReadOnlyList<string>? rootFolders, BaseItem item)
-    {
-        var isItsKind = app switch
-        {
-            "Sonarr" => item is Episode,
-            "Radarr" => item is Movie,
-            _ => true,
-        };
-        return isItsKind && (rootFolders is null || rootFolders.Any(folder => ArrPaths.IsWithin(item.Path, folder)));
+        return new SourceAnswers(candidates, new Dictionary<Guid, string>());
     }
 
     private static string CacheKey(ArrConnection instance) =>
@@ -193,9 +167,7 @@ public class ArrSource : IAddedDateSource
 
     private Task<T> FetchAsync<T>(ArrConnection instance, string cacheKey, Func<CancellationToken, Task<T>> fetch, CancellationToken cancellationToken)
     {
-        var service = _lastKnown.TryGetValue(instance.Url, out var known) ? known.App + " at " + instance.Url : instance.Url;
+        var service = _appNames.TryGetValue(instance.Url, out var app) ? app + " at " + instance.Url : instance.Url;
         return _cache.GetAsync(cacheKey, token => _availability.CallAsync("arr " + instance.Url, service, fetch, token), cancellationToken);
     }
-
-    private sealed record KnownInstance(string App, IReadOnlyList<string> RootFolders);
 }

@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.OriginalDateAdded.Sources;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Tasks;
@@ -19,13 +20,15 @@ public class RestoreOriginalDatesTask : IScheduledTask
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateResolver _resolver;
     private readonly AddedDateApplier _applier;
+    private readonly SourceAvailability _availability;
     private readonly ILogger<RestoreOriginalDatesTask> _logger;
 
-    public RestoreOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, ILogger<RestoreOriginalDatesTask> logger)
+    public RestoreOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, SourceAvailability availability, ILogger<RestoreOriginalDatesTask> logger)
     {
         _libraryManager = libraryManager;
         _resolver = resolver;
         _applier = applier;
+        _availability = availability;
         _logger = logger;
     }
 
@@ -44,6 +47,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        var failuresBefore = _availability.FailureCounts();
         var itemsToCheck = PluginSettings.Configuration.ItemsToCheck;
         var supported = _libraryManager.GetItemList(new InternalItemsQuery
             {
@@ -96,11 +100,21 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
         if (PluginSettings.DryRun)
         {
-            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source was unavailable, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
+            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source failed, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
         }
         else
         {
-            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source was unavailable, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
+            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source failed, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
+        }
+
+        var unavailable = _availability.FailureCounts()
+            .Where(failure => failure.Value.Count > failuresBefore.GetValueOrDefault(failure.Key).Count)
+            .Select(failure => failure.Value.Service)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+        if (unavailable.Count > 0)
+        {
+            _logger.LogWarning("Unavailable during this run: {Services}. Run it again to check the items they manage", string.Join(", ", unavailable));
         }
     }
 }

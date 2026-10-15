@@ -17,6 +17,7 @@ public class SourceAvailability
     private readonly TimeProvider _timeProvider;
     private readonly Lock _lock = new();
     private readonly Dictionary<string, DateTimeOffset> _pausedUntil = [];
+    private readonly Dictionary<string, (string Service, int Count)> _failures = [];
 
     public SourceAvailability(ILogger<SourceAvailability> logger)
         : this(logger, _defaultRetryDelays, TimeProvider.System)
@@ -37,6 +38,7 @@ public class SourceAvailability
         {
             if (_pausedUntil.TryGetValue(key, out var until) && _timeProvider.GetUtcNow() < until)
             {
+                CountFailure(key, service);
                 throw new SourceException(string.Create(CultureInfo.InvariantCulture, $"{service} is unavailable, next try after {until.UtcDateTime:u}"));
             }
         }
@@ -63,6 +65,17 @@ public class SourceAvailability
         }
     }
 
+    // Compare two snapshots to tell which services failed in between
+    public IReadOnlyDictionary<string, (string Service, int Count)> FailureCounts()
+    {
+        lock (_lock)
+        {
+            return new Dictionary<string, (string Service, int Count)>(_failures);
+        }
+    }
+
+    private void CountFailure(string key, string service) => _failures[key] = (service, _failures.GetValueOrDefault(key).Count + 1);
+
     private void Pause(string key, string service, string message, int attempts)
     {
         bool wasAvailable;
@@ -70,12 +83,13 @@ public class SourceAvailability
         {
             wasAvailable = !_pausedUntil.ContainsKey(key);
             _pausedUntil[key] = _timeProvider.GetUtcNow() + _pause;
+            CountFailure(key, service);
         }
 
         if (wasAvailable)
         {
             _logger.LogWarning(
-                "{Service} is unavailable after {Attempts} attempt(s) ({Message}); items it would be asked about get no date added decision, trying again in {Minutes} minutes",
+                "{Service} is unavailable after {Attempts} attempt(s) ({Message}), trying again in {Minutes} minutes",
                 service,
                 attempts,
                 message,
