@@ -73,16 +73,17 @@ public class AddedDateResolver
         }
 
         var window = PluginSettings.ReplacementWindow;
-        if (candidate.PredecessorRemovedAt is { } removedAt && scannedAt - removedAt > window)
+        if (candidate.PredecessorRemovedAt is { } removedAt && (scannedAt - removedAt).Duration() > window)
         {
             _logger.Log(
                 PluginSettings.DetailLevel,
-                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), predecessor removed {Days:F1} days before, window is {WindowDays} days",
+                "Item {ItemId}: rejected {AddedAt} from {Source} ({Detail}), predecessor removed {Days:F1} days {Relation} the item was scanned, window is {WindowDays} days",
                 itemId,
                 candidate.AddedAt,
                 sourceName,
                 candidate.Detail,
-                (scannedAt - removedAt).TotalDays,
+                (scannedAt - removedAt).Duration().TotalDays,
+                removedAt < scannedAt ? "before" : "after",
                 window.TotalDays);
             return false;
         }

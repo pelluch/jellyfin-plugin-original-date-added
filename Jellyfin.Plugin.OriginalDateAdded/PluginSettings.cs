@@ -15,6 +15,6 @@ internal static class PluginSettings
 
     public static LogLevel DetailLevel => Configuration.VerboseLogging ? LogLevel.Information : LogLevel.Debug;
 
-    // A copy appearing more than this after its predecessor's removal counts as new content
+    // A copy scanned more than this before or after its predecessor's removal keeps its own date
     public static TimeSpan ReplacementWindow => Configuration.ReplacementWindowDays > 0 ? TimeSpan.FromDays(Configuration.ReplacementWindowDays) : TimeSpan.MaxValue;
 }
