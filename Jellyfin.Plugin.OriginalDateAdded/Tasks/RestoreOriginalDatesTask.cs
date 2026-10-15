@@ -67,7 +67,6 @@ public class RestoreOriginalDatesTask : IScheduledTask
         _logger.LogInformation("Restoring original dates added: checking {Count} items ({NotRefreshed} skipped, not refreshed yet)", itemIds.Count, supported.Count - itemIds.Count);
 
         var updated = 0;
-        var skipped = 0;
         var removed = 0;
         for (var start = 0; start < itemIds.Count; start += ChunkSize)
         {
@@ -78,16 +77,12 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 .OfType<BaseItem>()
                 .ToList();
             removed += chunkSize - chunk.Count;
-            var resolution = await _resolver.ResolveForBackfillAsync(chunk, cancellationToken).ConfigureAwait(false);
-            skipped += resolution.Failures.Count;
+            var decisions = await _resolver.ResolveForBackfillAsync(chunk, cancellationToken).ConfigureAwait(false);
             foreach (var item in chunk)
             {
-                if (!resolution.Decisions.TryGetValue(item.Id, out var decision))
+                if (!decisions.TryGetValue(item.Id, out var decision))
                 {
-                    if (!resolution.Failures.ContainsKey(item.Id))
-                    {
-                        _logger.Log(PluginSettings.DetailLevel, "No date added found for {Name} ({ItemId})", item.Name, item.Id);
-                    }
+                    _logger.Log(PluginSettings.DetailLevel, "No usable date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
                 else if (await _applier.ApplyAsync(item, decision, "by the Restore original dates added task", cancellationToken).ConfigureAwait(false))
                 {
@@ -100,11 +95,11 @@ public class RestoreOriginalDatesTask : IScheduledTask
 
         if (PluginSettings.DryRun)
         {
-            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Skipped} skipped because a source failed, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
+            _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Removed} no longer in the library", updated, itemIds.Count, removed);
         }
         else
         {
-            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Skipped} skipped because a source failed, {Removed} no longer in the library", updated, itemIds.Count, skipped, removed);
+            _logger.LogInformation("{Updated} of {Count} items had their date added changed, {Removed} no longer in the library", updated, itemIds.Count, removed);
         }
 
         var unavailable = _availability.FailureCounts()

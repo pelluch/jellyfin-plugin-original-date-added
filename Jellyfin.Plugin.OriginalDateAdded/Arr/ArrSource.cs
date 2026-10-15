@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -27,12 +28,12 @@ public class ArrSource : IAddedDateSource
 
     public string Name => "arr";
 
-    public async Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
+    public async Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var config = PluginSettings.Configuration;
         if (!config.ArrEnabled)
         {
-            return SourceAnswers.None;
+            return ReadOnlyDictionary<Guid, AddedDateCandidate>.Empty;
         }
 
         var candidates = new Dictionary<Guid, AddedDateCandidate>();
@@ -66,7 +67,7 @@ public class ArrSource : IAddedDateSource
             remaining.RemoveAll(item => candidates.ContainsKey(item.Id));
         }
 
-        return new SourceAnswers(candidates, new Dictionary<Guid, string>());
+        return candidates;
     }
 
     private static string CacheKey(ArrConnection instance) =>

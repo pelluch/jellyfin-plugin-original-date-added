@@ -18,7 +18,7 @@ public class RemovedItemsSource : IAddedDateSource
 
     public string Name => "removed-items";
 
-    public Task<SourceAnswers> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
+    public Task<IReadOnlyDictionary<Guid, AddedDateCandidate>> GetCandidatesAsync(IReadOnlyList<SourceItem> items, CancellationToken cancellationToken)
     {
         var candidates = new Dictionary<Guid, AddedDateCandidate>();
         foreach (var item in items.Select(sourceItem => sourceItem.Item).Where(ItemIdentity.IsSupported))
@@ -30,6 +30,6 @@ public class RemovedItemsSource : IAddedDateSource
             }
         }
 
-        return Task.FromResult(SourceAnswers.None with { Candidates = candidates });
+        return Task.FromResult<IReadOnlyDictionary<Guid, AddedDateCandidate>>(candidates);
     }
 }

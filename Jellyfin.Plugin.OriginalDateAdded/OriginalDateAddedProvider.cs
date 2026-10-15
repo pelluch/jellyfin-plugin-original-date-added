@@ -50,14 +50,14 @@ public class OriginalDateAddedProvider : ICustomMetadataProvider<Movie>, ICustom
             if (!ItemIdentity.HasBeenRefreshed(item))
             {
                 _logger.Log(PluginSettings.DetailLevel, "First refresh of {Name} ({ItemId})", item.Name, item.Id);
-                var resolution = await _resolver.ResolveAsync([item], cancellationToken).ConfigureAwait(false);
-                if (resolution.Decisions.TryGetValue(item.Id, out var decision))
+                var decisions = await _resolver.ResolveAsync([item], cancellationToken).ConfigureAwait(false);
+                if (decisions.TryGetValue(item.Id, out var decision))
                 {
                     _applier.Record(item, decision, "at first refresh", dryRun);
                 }
-                else if (!resolution.Failures.ContainsKey(item.Id))
+                else
                 {
-                    _logger.Log(PluginSettings.DetailLevel, "No date added found for {Name} ({ItemId})", item.Name, item.Id);
+                    _logger.Log(PluginSettings.DetailLevel, "No usable date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
             }
 
