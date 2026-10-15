@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.OriginalDateAdded.Tasks;
 
-public class RestoreOriginalDatesTask : IScheduledTask
+public class BackfillOriginalDatesTask : IScheduledTask
 {
     private const int ChunkSize = 25;
 
@@ -21,9 +21,9 @@ public class RestoreOriginalDatesTask : IScheduledTask
     private readonly AddedDateResolver _resolver;
     private readonly AddedDateApplier _applier;
     private readonly SourceAvailability _availability;
-    private readonly ILogger<RestoreOriginalDatesTask> _logger;
+    private readonly ILogger<BackfillOriginalDatesTask> _logger;
 
-    public RestoreOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, SourceAvailability availability, ILogger<RestoreOriginalDatesTask> logger)
+    public BackfillOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, SourceAvailability availability, ILogger<BackfillOriginalDatesTask> logger)
     {
         _libraryManager = libraryManager;
         _resolver = resolver;
@@ -32,18 +32,15 @@ public class RestoreOriginalDatesTask : IScheduledTask
         _logger = logger;
     }
 
-    public string Name => "Restore original dates added";
+    public string Name => "Backfill original dates added";
 
-    public string Key => "OriginalDateAddedRestoreOriginalDates";
+    public string Key => "OriginalDateAddedBackfillOriginalDates";
 
-    public string Description => "Gives movies and episodes the date they were first added: from Sonarr's and Radarr's import history, or from an earlier copy they replaced. Checks the newest items, as many as Items to check in the plugin settings (0 = all). Locked items are skipped.";
+    public string Description => "Gives movies and episodes the date they were first added, from Sonarr's and Radarr's import history and from earlier copies they replaced. Checks the newest items, as many as Items to backfill in the plugin settings (0 = all). Locked items are skipped.";
 
     public string Category => "Original Date Added";
 
-    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() =>
-    [
-        new TaskTriggerInfo { Type = TaskTriggerInfoType.DailyTrigger, TimeOfDayTicks = TimeSpan.FromHours(4).Ticks },
-    ];
+    public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => [];
 
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
@@ -64,7 +61,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
             .OrderBy(item => item.Path, StringComparer.Ordinal) // a series' episodes together, so its Sonarr data is fetched once per run
             .Select(item => item.Id)
             .ToList();
-        _logger.LogInformation("Restoring original dates added: checking {Count} items ({NotRefreshed} skipped, not refreshed yet)", itemIds.Count, supported.Count - itemIds.Count);
+        _logger.LogInformation("Backfilling original dates added: checking {Count} items ({NotRefreshed} skipped, not refreshed yet)", itemIds.Count, supported.Count - itemIds.Count);
 
         var updated = 0;
         var removed = 0;
@@ -84,7 +81,7 @@ public class RestoreOriginalDatesTask : IScheduledTask
                 {
                     _logger.Log(PluginSettings.DetailLevel, "No usable date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
-                else if (await _applier.ApplyAsync(item, decision, "by the Restore original dates added task", cancellationToken).ConfigureAwait(false))
+                else if (await _applier.ApplyAsync(item, decision, "by the Backfill original dates added task", cancellationToken).ConfigureAwait(false))
                 {
                     updated++;
                 }

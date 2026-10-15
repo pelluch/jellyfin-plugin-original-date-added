@@ -8,7 +8,7 @@ public class PluginConfiguration : BasePluginConfiguration
 {
     public int ReplacementWindowDays { get; set; } = 7;
 
-    public int ItemsToCheck { get; set; } = 500;
+    public int ItemsToCheck { get; set; }
 
     public bool DryRun { get; set; }
 
