@@ -16,21 +16,13 @@ public class ArrSource : IAddedDateSource
 {
     private readonly ArrClient _client;
     private readonly SourceAvailability _availability;
-    private static readonly TimeSpan _maxAgeAfterMiss = TimeSpan.FromMinutes(1);
-
-    private readonly ResponseCache _cache;
+    private readonly ResponseCache _cache = new(TimeSpan.FromMinutes(5));
     private readonly ConcurrentDictionary<string, KnownInstance> _lastKnown = new(StringComparer.Ordinal);
 
     public ArrSource(ArrClient client, SourceAvailability availability)
-        : this(client, availability, TimeProvider.System)
-    {
-    }
-
-    public ArrSource(ArrClient client, SourceAvailability availability, TimeProvider timeProvider)
     {
         _client = client;
         _availability = availability;
-        _cache = new ResponseCache(TimeSpan.FromMinutes(5), timeProvider);
     }
 
     public string Name => "arr";
@@ -58,15 +50,14 @@ public class ArrSource : IAddedDateSource
             {
                 app = (await FetchAsync(instance, "status " + instance.Url, token => _client.GetStatusAsync(instance, token), cancellationToken).ConfigureAwait(false)).AppName;
                 var rootFolders = await FetchAsync(instance, "root folders " + CacheKey(instance), token => _client.GetRootFoldersAsync(instance, token), cancellationToken).ConfigureAwait(false);
-                var rootFolderPaths = rootFolders.Select(folder => folder.Path).ToList();
-                _lastKnown[instance.Url] = new KnownInstance(app, rootFolderPaths);
+                _lastKnown[instance.Url] = new KnownInstance(app, rootFolders.Select(folder => folder.Path).ToList());
                 switch (app)
                 {
                     case "Sonarr":
-                        await FindEpisodesAsync(instance, app, rootFolderPaths, remaining.OfType<Episode>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
+                        await FindEpisodesAsync(instance, app, remaining.OfType<Episode>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
                         break;
                     case "Radarr":
-                        await FindMoviesAsync(instance, app, rootFolderPaths, remaining.OfType<Movie>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
+                        await FindMoviesAsync(instance, app, remaining.OfType<Movie>().ToList(), candidates, cancellationToken).ConfigureAwait(false);
                         break;
                 }
             }
@@ -120,44 +111,33 @@ public class ArrSource : IAddedDateSource
         return new AddedDateCandidate(start.Date, null, detail, IsAuthoritative: start.IsImport);
     }
 
-    private async Task FindMoviesAsync(ArrConnection instance, string app, List<string> rootFolders, List<Movie> movies, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
+    private async Task FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
         if (movies.Count == 0)
         {
             return;
         }
 
-        var byPath = await FetchMoviesAsync(instance, null, cancellationToken).ConfigureAwait(false);
+        var byPath = await FetchAsync(
+                instance,
+                "movies " + CacheKey(instance),
+                async token => IndexByFilePath(await _client.GetMoviesAsync(instance, token).ConfigureAwait(false)),
+                cancellationToken)
+            .ConfigureAwait(false);
         foreach (var movie in movies)
         {
-            TimeSpan? maxAge = null;
-            if (!byPath.ContainsKey(movie.Path) && rootFolders.Any(folder => ArrPaths.IsWithin(movie.Path, folder)))
-            {
-                maxAge = _maxAgeAfterMiss; // imported since the cached list was fetched
-                byPath = await FetchMoviesAsync(instance, maxAge, cancellationToken).ConfigureAwait(false);
-            }
-
             if (byPath.TryGetValue(movie.Path, out var arrMovie))
             {
                 var history = await FetchAsync(
                         instance,
                         string.Create(CultureInfo.InvariantCulture, $"movie history {instance.Url} {arrMovie.MovieId}"),
                         token => _client.GetMovieHistoryAsync(instance, arrMovie.MovieId, token),
-                        cancellationToken,
-                        maxAge)
+                        cancellationToken)
                     .ConfigureAwait(false);
                 found[movie.Id] = ToCandidate(app, movie, ArrLineage.FindStart(history, arrMovie.File, PluginSettings.ReplacementWindow));
             }
         }
     }
-
-    private Task<Dictionary<string, (int MovieId, ArrFile File)>> FetchMoviesAsync(ArrConnection instance, TimeSpan? maxAge, CancellationToken cancellationToken) =>
-        FetchAsync(
-            instance,
-            "movies " + CacheKey(instance),
-            async token => IndexByFilePath(await _client.GetMoviesAsync(instance, token).ConfigureAwait(false)),
-            cancellationToken,
-            maxAge);
 
     private static Dictionary<string, (int MovieId, ArrFile File)> IndexByFilePath(IReadOnlyList<ArrMovie> movies)
     {
@@ -173,47 +153,31 @@ public class ArrSource : IAddedDateSource
         return byPath;
     }
 
-    private async Task FindEpisodesAsync(ArrConnection instance, string app, List<string> rootFolders, List<Episode> episodes, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
+    private async Task FindEpisodesAsync(ArrConnection instance, string app, List<Episode> episodes, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
         if (episodes.Count == 0)
         {
             return;
         }
 
-        var allSeries = await FetchSeriesAsync(instance, null, cancellationToken).ConfigureAwait(false);
+        var allSeries = await FetchAsync(instance, "series " + CacheKey(instance), token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
         foreach (var episode in episodes)
         {
-            TimeSpan? maxAge = null;
-            var show = FindShow(allSeries, episode);
-            if (show is null && rootFolders.Any(folder => ArrPaths.IsWithin(episode.Path, folder)))
-            {
-                maxAge = _maxAgeAfterMiss; // a series added since the cached list was fetched
-                allSeries = await FetchSeriesAsync(instance, maxAge, cancellationToken).ConfigureAwait(false);
-                show = FindShow(allSeries, episode);
-            }
-
+            var show = allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length);
             if (show is null)
             {
                 continue;
             }
 
             var key = string.Create(CultureInfo.InvariantCulture, $"{CacheKey(instance)} {show.Id}");
-            var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken, maxAge).ConfigureAwait(false);
-            var file = files.FirstOrDefault(file => file.Path == episode.Path);
-            if (file is null && maxAge is null)
-            {
-                maxAge = _maxAgeAfterMiss; // imported since the cached files were fetched
-                files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken, maxAge).ConfigureAwait(false);
-                file = files.FirstOrDefault(file => file.Path == episode.Path);
-            }
-
-            if (file is null)
+            var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+            if (files.FirstOrDefault(file => file.Path == episode.Path) is not { } file)
             {
                 continue;
             }
 
-            var arrEpisodes = await FetchAsync(instance, "episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken, maxAge).ConfigureAwait(false);
-            var history = await FetchAsync(instance, "series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken, maxAge).ConfigureAwait(false);
+            var arrEpisodes = await FetchAsync(instance, "episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+            var history = await FetchAsync(instance, "series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
             var start = arrEpisodes
                 .Where(arrEpisode => arrEpisode.EpisodeFileId == file.Id)
                 .Select(arrEpisode => ArrLineage.FindStart(history.Where(e => e.ItemId == arrEpisode.Id), file, PluginSettings.ReplacementWindow))
@@ -227,16 +191,10 @@ public class ArrSource : IAddedDateSource
         }
     }
 
-    private static ArrSeries? FindShow(IReadOnlyList<ArrSeries> allSeries, Episode episode) =>
-        allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length);
-
-    private Task<IReadOnlyList<ArrSeries>> FetchSeriesAsync(ArrConnection instance, TimeSpan? maxAge, CancellationToken cancellationToken) =>
-        FetchAsync(instance, "series " + CacheKey(instance), token => _client.GetSeriesAsync(instance, token), cancellationToken, maxAge);
-
-    private Task<T> FetchAsync<T>(ArrConnection instance, string cacheKey, Func<CancellationToken, Task<T>> fetch, CancellationToken cancellationToken, TimeSpan? maxAge = null)
+    private Task<T> FetchAsync<T>(ArrConnection instance, string cacheKey, Func<CancellationToken, Task<T>> fetch, CancellationToken cancellationToken)
     {
         var service = _lastKnown.TryGetValue(instance.Url, out var known) ? known.App + " at " + instance.Url : instance.Url;
-        return _cache.GetAsync(cacheKey, token => _availability.CallAsync("arr " + instance.Url, service, fetch, token), cancellationToken, maxAge);
+        return _cache.GetAsync(cacheKey, token => _availability.CallAsync("arr " + instance.Url, service, fetch, token), cancellationToken);
     }
 
     private sealed record KnownInstance(string App, IReadOnlyList<string> RootFolders);
