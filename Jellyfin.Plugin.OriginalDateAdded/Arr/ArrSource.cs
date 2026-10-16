@@ -15,6 +15,8 @@ namespace Jellyfin.Plugin.OriginalDateAdded.Arr;
 
 public class ArrSource : IAddedDateSource
 {
+    private const int ParallelFetches = 5;
+
     private readonly ArrClient _client;
     private readonly SourceAvailability _availability;
     private readonly ResponseCache _cache = new(TimeSpan.FromMinutes(5));
@@ -36,7 +38,7 @@ public class ArrSource : IAddedDateSource
             return ReadOnlyDictionary<Guid, AddedDateCandidate>.Empty;
         }
 
-        var candidates = new Dictionary<Guid, AddedDateCandidate>();
+        var candidates = new ConcurrentDictionary<Guid, AddedDateCandidate>();
         var remaining = items.Select(sourceItem => sourceItem.Item).Where(item => ItemIdentity.IsSupported(item) && !string.IsNullOrEmpty(item.Path)).ToList();
         foreach (var instance in config.ArrInstances.Where(instance => instance.Url.Length > 0 && instance.ApiKey.Length > 0))
         {
@@ -86,7 +88,22 @@ public class ArrSource : IAddedDateSource
         return new AddedDateCandidate(start.Date, null, detail, IsImport: start.IsImport);
     }
 
-    private async Task FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
+    private static Task ForEachAsync<T>(IEnumerable<T> source, Func<T, CancellationToken, Task> body, CancellationToken cancellationToken)
+        => Parallel.ForEachAsync(
+            source,
+            new ParallelOptions { MaxDegreeOfParallelism = ParallelFetches, CancellationToken = cancellationToken },
+            async (element, token) =>
+            {
+                try
+                {
+                    await body(element, token).ConfigureAwait(false);
+                }
+                catch (SourceException)
+                {
+                }
+            });
+
+    private async Task FindMoviesAsync(ArrConnection instance, string app, List<Movie> movies, ConcurrentDictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
         if (movies.Count == 0)
         {
@@ -99,19 +116,21 @@ public class ArrSource : IAddedDateSource
                 async token => IndexByFilePath(await _client.GetMoviesAsync(instance, token).ConfigureAwait(false)),
                 cancellationToken)
             .ConfigureAwait(false);
-        foreach (var movie in movies)
-        {
-            if (byPath.TryGetValue(movie.Path, out var arrMovie))
-            {
-                var history = await FetchAsync(
-                        instance,
-                        string.Create(CultureInfo.InvariantCulture, $"movie history {instance.Url} {arrMovie.MovieId}"),
-                        token => _client.GetMovieHistoryAsync(instance, arrMovie.MovieId, token),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                found[movie.Id] = ToCandidate(app, movie, ArrLineage.FindStart(history, arrMovie.File, PluginSettings.ReplacementWindow));
-            }
-        }
+        await ForEachAsync(
+                movies.Where(movie => byPath.ContainsKey(movie.Path)),
+                async (movie, token) =>
+                {
+                    var (movieId, file) = byPath[movie.Path];
+                    var history = await FetchAsync(
+                            instance,
+                            string.Create(CultureInfo.InvariantCulture, $"movie history {instance.Url} {movieId}"),
+                            historyToken => _client.GetMovieHistoryAsync(instance, movieId, historyToken),
+                            token)
+                        .ConfigureAwait(false);
+                    found[movie.Id] = ToCandidate(app, movie, ArrLineage.FindStart(history, file, PluginSettings.ReplacementWindow));
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private static Dictionary<string, (int MovieId, ArrFile File)> IndexByFilePath(IReadOnlyList<ArrMovie> movies)
@@ -128,7 +147,7 @@ public class ArrSource : IAddedDateSource
         return byPath;
     }
 
-    private async Task FindEpisodesAsync(ArrConnection instance, string app, List<Episode> episodes, Dictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
+    private async Task FindEpisodesAsync(ArrConnection instance, string app, List<Episode> episodes, ConcurrentDictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
     {
         if (episodes.Count == 0)
         {
@@ -136,23 +155,35 @@ public class ArrSource : IAddedDateSource
         }
 
         var allSeries = await FetchAsync(instance, "series " + CacheKey(instance), token => _client.GetSeriesAsync(instance, token), cancellationToken).ConfigureAwait(false);
+        var byShow = episodes
+            .Select(episode => (Episode: episode, Show: allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length)))
+            .Where(pair => pair.Show is not null)
+            .GroupBy(pair => pair.Show!, pair => pair.Episode);
+        await ForEachAsync(byShow, (group, token) => FindShowEpisodesAsync(instance, app, group.Key, group.ToList(), found, token), cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task FindShowEpisodesAsync(ArrConnection instance, string app, ArrSeries show, List<Episode> episodes, ConcurrentDictionary<Guid, AddedDateCandidate> found, CancellationToken cancellationToken)
+    {
+        var key = string.Create(CultureInfo.InvariantCulture, $"{CacheKey(instance)} {show.Id}");
+        var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+        var matched = new List<(Episode Episode, ArrFile File)>();
         foreach (var episode in episodes)
         {
-            var show = allSeries.Where(series => ArrPaths.IsWithin(episode.Path, series.Path)).MaxBy(series => series.Path.Length);
-            if (show is null)
+            if (files.FirstOrDefault(file => file.Path == episode.Path) is { } file)
             {
-                continue;
+                matched.Add((episode, file));
             }
+        }
 
-            var key = string.Create(CultureInfo.InvariantCulture, $"{CacheKey(instance)} {show.Id}");
-            var files = await FetchAsync(instance, "episode files " + key, token => _client.GetEpisodeFilesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
-            if (files.FirstOrDefault(file => file.Path == episode.Path) is not { } file)
-            {
-                continue;
-            }
+        if (matched.Count == 0)
+        {
+            return;
+        }
 
-            var arrEpisodes = await FetchAsync(instance, "episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
-            var history = await FetchAsync(instance, "series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+        var arrEpisodes = await FetchAsync(instance, "episodes " + key, token => _client.GetEpisodesAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+        var history = await FetchAsync(instance, "series history " + key, token => _client.GetSeriesHistoryAsync(instance, show.Id, token), cancellationToken).ConfigureAwait(false);
+        foreach (var (episode, file) in matched)
+        {
             var start = arrEpisodes
                 .Where(arrEpisode => arrEpisode.EpisodeFileId == file.Id)
                 .Select(arrEpisode => ArrLineage.FindStart(history.Where(e => e.ItemId == arrEpisode.Id), file, PluginSettings.ReplacementWindow))

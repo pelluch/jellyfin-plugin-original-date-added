@@ -15,7 +15,7 @@ namespace Jellyfin.Plugin.OriginalDateAdded.Tasks;
 
 public class BackfillOriginalDatesTask : IScheduledTask
 {
-    private const int ChunkSize = 25;
+    private const int ChunkSize = 500;
     private const string Reason = "by the Backfill original dates added task";
 
     private readonly ILibraryManager _libraryManager;
