@@ -73,12 +73,12 @@ public sealed class RemovedItemsRecorder : BackgroundService
     private void OnItemRemoved(object? sender, ItemChangeEventArgs e)
     {
         var item = e.Item;
+        _store.RemoveItem(item.Id);
         if (!ItemIdentity.IsSupported(item))
         {
             return;
         }
 
-        _store.RemoveItem(item.Id);
         var keys = ItemIdentity.ContentKeys(item);
         if (keys.Count == 0)
         {

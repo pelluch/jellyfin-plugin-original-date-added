@@ -27,6 +27,8 @@ public static class ItemIdentity
     {
         Episode { ParentIndexNumber: { } season, IndexNumber: { } number } episode
             => string.Create(CultureInfo.InvariantCulture, $"{episode.SeriesName} S{season:00}E{number:00}"),
+        Season { IndexNumber: { } number } season => string.Create(CultureInfo.InvariantCulture, $"{season.SeriesName} S{number:00}"),
+        Season season => string.Create(CultureInfo.InvariantCulture, $"{season.SeriesName} {season.Name}"),
         { ProductionYear: { } year } => string.Create(CultureInfo.InvariantCulture, $"{item.Name} ({year})"),
         _ => item.Name,
     };

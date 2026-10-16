@@ -16,19 +16,22 @@ namespace Jellyfin.Plugin.OriginalDateAdded.Tasks;
 public class BackfillOriginalDatesTask : IScheduledTask
 {
     private const int ChunkSize = 25;
+    private const string Reason = "by the Backfill original dates added task";
 
     private readonly ILibraryManager _libraryManager;
     private readonly AddedDateResolver _resolver;
     private readonly AddedDateApplier _applier;
     private readonly SourceAvailability _availability;
+    private readonly SeriesAndSeasonDates _seriesAndSeasonDates;
     private readonly ILogger<BackfillOriginalDatesTask> _logger;
 
-    public BackfillOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, SourceAvailability availability, ILogger<BackfillOriginalDatesTask> logger)
+    public BackfillOriginalDatesTask(ILibraryManager libraryManager, AddedDateResolver resolver, AddedDateApplier applier, SourceAvailability availability, SeriesAndSeasonDates seriesAndSeasonDates, ILogger<BackfillOriginalDatesTask> logger)
     {
         _libraryManager = libraryManager;
         _resolver = resolver;
         _applier = applier;
         _availability = availability;
+        _seriesAndSeasonDates = seriesAndSeasonDates;
         _logger = logger;
     }
 
@@ -36,7 +39,7 @@ public class BackfillOriginalDatesTask : IScheduledTask
 
     public string Key => "OriginalDateAddedBackfillOriginalDates";
 
-    public string Description => "Gives movies and episodes the date they were first added, from Sonarr's and Radarr's import history and from earlier copies they replaced. Checks the newest items, as many as Items to backfill in the plugin settings (0 = all). Locked items are skipped.";
+    public string Description => "Gives movies and episodes the date they were first added, from Sonarr's and Radarr's import history and from earlier copies they replaced. Checks the newest items, as many as Items to backfill in the plugin settings (0 = all). Then gives each show and season the date of its earliest episode. Locked items are skipped.";
 
     public string Category => "Original Date Added";
 
@@ -81,7 +84,7 @@ public class BackfillOriginalDatesTask : IScheduledTask
                 {
                     _logger.Log(PluginSettings.DetailLevel, "No usable date added found for {Name} ({ItemId})", item.Name, item.Id);
                 }
-                else if (await _applier.ApplyAsync(item, decision, "by the Backfill original dates added task", cancellationToken).ConfigureAwait(false))
+                else if (await _applier.ApplyAsync(item, decision, Reason, cancellationToken).ConfigureAwait(false))
                 {
                     updated++;
                 }
@@ -90,6 +93,7 @@ public class BackfillOriginalDatesTask : IScheduledTask
             progress.Report(100.0 * (start + chunkSize) / itemIds.Count);
         }
 
+        await _seriesAndSeasonDates.UpdateAsync(Reason, cancellationToken).ConfigureAwait(false);
         if (PluginSettings.DryRun)
         {
             _logger.LogInformation("Dry run: {Updated} of {Count} items would have their date added changed, {Removed} no longer in the library", updated, itemIds.Count, removed);
